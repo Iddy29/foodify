@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 import { useCartStore } from '@/store/cartStore';
+import { useNotificationStore } from '@/store/notificationStore';
 import type { Order } from '@/data/mockData';
 
 type OrderStatus = Order['status'];
@@ -294,6 +295,9 @@ export default function OrderTrackingScreen() {
   const router = useRouter();
 
   const orders = useCartStore((s) => s.orders);
+  const updateOrderStatus = useCartStore((s) => s.updateOrderStatus);
+  const sendOrderStatusNotification = useNotificationStore((s) => s.sendOrderStatusNotification);
+  const updateBadgeCount = useNotificationStore((s) => s.updateBadgeCount);
   const order = useMemo(() => orders.find((o: Order) => o.id === id) ?? null, [orders, id]);
 
   const [currentStatus, setCurrentStatus] = useState<OrderStatus>(
@@ -315,18 +319,29 @@ export default function OrderTrackingScreen() {
     }
   }, [order, currentStatus]);
 
-  // Auto-advance simulation
+  // Auto-advance simulation with notifications
   useEffect(() => {
     if (currentStatus === 'arrived') return;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       const nextIndex = currentStatusIndex + 1;
       if (nextIndex < STATUS_SEQUENCE.length) {
-        setCurrentStatus(STATUS_SEQUENCE[nextIndex]);
+        const nextStatus = STATUS_SEQUENCE[nextIndex];
+        setCurrentStatus(nextStatus);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        // Update order in store and send notification
+        if (order) {
+          updateOrderStatus(order.id, nextStatus);
+          await sendOrderStatusNotification(order, nextStatus);
+          const activeCount = useCartStore.getState().orders.filter(
+            (o) => o.status !== 'arrived'
+          ).length;
+          await updateBadgeCount(activeCount);
+        }
       }
     }, AUTO_ADVANCE_INTERVAL);
     return () => clearTimeout(timer);
-  }, [currentStatus, currentStatusIndex]);
+  }, [currentStatus, currentStatusIndex, order, updateOrderStatus, sendOrderStatusNotification, updateBadgeCount]);
 
   // Pulse animation
   useEffect(() => {

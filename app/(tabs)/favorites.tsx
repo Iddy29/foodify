@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,17 +7,29 @@ import {
   Image,
   FlatList,
   Alert,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 import { getRestaurantById } from '@/data/mockData';
 import type { Restaurant, MenuItem } from '@/data/mockData';
 import { useFavoritesStore } from '@/store/favoritesStore';
+import { useCartStore } from '@/store/cartStore';
+import { useNotificationStore } from '@/store/notificationStore';
 
 type TabType = 'restaurants' | 'dishes';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_GAP = Spacing.md;
+const CARD_WIDTH = (SCREEN_WIDTH - Spacing.lg * 2 - GRID_GAP) / 2;
+
+// Varied heights for Pinterest effect
+const CARD_HEIGHTS = [200, 240, 220, 260, 210, 250];
 
 interface FavoriteDish {
   menuItem: MenuItem;
@@ -28,9 +40,22 @@ export default function FavoritesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('restaurants');
+  const tabIndicatorAnim = useRef(new Animated.Value(0)).current;
 
   const favorites = useFavoritesStore((s) => s.favorites);
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
+  const addItem = useCartStore((s) => s.addItem);
+  const showToast = useNotificationStore((s) => s.showToast);
+
+  useEffect(() => {
+    Animated.spring(tabIndicatorAnim, {
+      toValue: activeTab === 'restaurants' ? 0 : 1,
+      friction: 8,
+      tension: 60,
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab, tabIndicatorAnim]);
+
   const favoriteRestaurants = useMemo(() => {
     const ids = favorites
       .filter((f) => f.type === 'restaurant')
@@ -118,96 +143,149 @@ export default function FavoritesScreen() {
     [router],
   );
 
+  const handleQuickReorder = useCallback(
+    (dish: FavoriteDish) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const defaultSize = dish.menuItem.sizes[1] ?? dish.menuItem.sizes[0];
+      addItem({
+        menuItem: dish.menuItem,
+        quantity: 1,
+        selectedSize: defaultSize,
+        specialInstructions: '',
+        restaurantId: dish.restaurant.id,
+        restaurantName: dish.restaurant.name,
+      });
+      showToast({
+        title: 'Added to Cart!',
+        message: `${dish.menuItem.name} from ${dish.restaurant.name}`,
+        type: 'success',
+        duration: 3000,
+      });
+    },
+    [addItem, showToast],
+  );
+
   const handleBrowseRestaurants = useCallback(() => {
     router.push('/(tabs)/search' as Href);
   }, [router]);
 
-  const renderRestaurantItem = useCallback(
-    ({ item }: { item: Restaurant }) => (
-      <TouchableOpacity
-        style={styles.restaurantCard}
-        onPress={() => handleRestaurantPress(item.id)}
-        activeOpacity={0.9}
-      >
-        <Image
-          source={{ uri: item.image }}
-          style={styles.restaurantImage}
-          resizeMode="cover"
-        />
-        <View style={styles.restaurantInfo}>
-          <Text style={styles.restaurantName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <View style={styles.restaurantMeta}>
-            <View style={styles.ratingContainer}>
-              <Ionicons name="star" size={14} color={Colors.star} />
-              <Text style={styles.ratingText}>{item.rating}</Text>
-            </View>
-            <View style={styles.metaDot} />
-            <Text style={styles.metaText} numberOfLines={1}>
-              {item.cuisine.slice(0, 2).join(', ')}
-            </Text>
-          </View>
-          <View style={styles.restaurantSubMeta}>
-            <Ionicons name="time-outline" size={12} color={Colors.text.light} />
-            <Text style={styles.subMetaText}>{item.deliveryTime}</Text>
-            <View style={styles.metaDotSmall} />
-            <Text style={styles.subMetaText}>{item.distance}</Text>
-          </View>
-        </View>
+  // ─── Pinterest-style Restaurant Grid ──────────────────────────────
+
+  const renderRestaurantCard = useCallback(
+    ({ item, index }: { item: Restaurant; index: number }) => {
+      const height = CARD_HEIGHTS[index % CARD_HEIGHTS.length];
+
+      return (
         <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() => handleRemoveRestaurant(item.id, item.name)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.7}
+          style={[styles.pinterestCard, { height }]}
+          onPress={() => handleRestaurantPress(item.id)}
+          activeOpacity={0.9}
         >
-          <Ionicons name="heart" size={22} color={Colors.primary} />
+          <Image
+            source={{ uri: item.coverImage || item.image }}
+            style={styles.pinterestImage}
+            resizeMode="cover"
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.7)']}
+            style={styles.pinterestGradient}
+          >
+            <View style={styles.pinterestContent}>
+              <Text style={styles.pinterestName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <View style={styles.pinterestMeta}>
+                <View style={styles.pinterestRating}>
+                  <Ionicons name="star" size={12} color={Colors.star} />
+                  <Text style={styles.pinterestRatingText}>{item.rating}</Text>
+                </View>
+                <Text style={styles.pinterestDelivery}>{item.deliveryTime}</Text>
+              </View>
+              <Text style={styles.pinterestCuisine} numberOfLines={1}>
+                {item.cuisine.slice(0, 2).join(' · ')}
+              </Text>
+            </View>
+          </LinearGradient>
+
+          {/* Favorite Heart */}
+          <TouchableOpacity
+            style={styles.pinterestHeart}
+            onPress={() => handleRemoveRestaurant(item.id, item.name)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="heart" size={20} color={Colors.primary} />
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
-    ),
+      );
+    },
     [handleRestaurantPress, handleRemoveRestaurant],
   );
 
-  const renderDishItem = useCallback(
-    ({ item }: { item: FavoriteDish }) => (
-      <TouchableOpacity
-        style={styles.dishCard}
-        onPress={() => handleDishPress(item.restaurant.id, item.menuItem.id)}
-        activeOpacity={0.9}
-      >
-        <Image
-          source={{ uri: item.menuItem.image }}
-          style={styles.dishImage}
-          resizeMode="cover"
-        />
-        <View style={styles.dishInfo}>
-          <Text style={styles.dishName} numberOfLines={1}>
-            {item.menuItem.name}
-          </Text>
-          <Text style={styles.dishRestaurant} numberOfLines={1}>
-            {item.restaurant.name}
-          </Text>
-          <Text style={styles.dishPrice}>
-            ${item.menuItem.price.toFixed(2)}
-          </Text>
-        </View>
+  // ─── Pinterest-style Dish Grid ────────────────────────────────────
+
+  const renderDishCard = useCallback(
+    ({ item, index }: { item: FavoriteDish; index: number }) => {
+      const height = CARD_HEIGHTS[(index + 2) % CARD_HEIGHTS.length];
+
+      return (
         <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() =>
-            handleRemoveDish(
-              item.menuItem.id,
-              item.restaurant.id,
-              item.menuItem.name,
-            )
-          }
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.7}
+          style={[styles.pinterestCard, { height }]}
+          onPress={() => handleDishPress(item.restaurant.id, item.menuItem.id)}
+          activeOpacity={0.9}
         >
-          <Ionicons name="heart" size={22} color={Colors.primary} />
+          <Image
+            source={{ uri: item.menuItem.image }}
+            style={styles.pinterestImage}
+            resizeMode="cover"
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.75)']}
+            style={styles.pinterestGradient}
+          >
+            <View style={styles.pinterestContent}>
+              <Text style={styles.pinterestName} numberOfLines={1}>
+                {item.menuItem.name}
+              </Text>
+              <Text style={styles.pinterestRestaurantName} numberOfLines={1}>
+                {item.restaurant.name}
+              </Text>
+              <View style={styles.pinterestDishBottom}>
+                <Text style={styles.pinterestPrice}>
+                  ${item.menuItem.price.toFixed(2)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.quickReorderBtn}
+                  onPress={() => handleQuickReorder(item)}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+                >
+                  <Ionicons name="add" size={16} color={Colors.white} />
+                  <Text style={styles.quickReorderText}>Re-order</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </LinearGradient>
+
+          {/* Favorite Heart */}
+          <TouchableOpacity
+            style={styles.pinterestHeart}
+            onPress={() =>
+              handleRemoveDish(
+                item.menuItem.id,
+                item.restaurant.id,
+                item.menuItem.name,
+              )
+            }
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="heart" size={20} color={Colors.primary} />
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
-    ),
-    [handleDishPress, handleRemoveDish],
+      );
+    },
+    [handleDishPress, handleRemoveDish, handleQuickReorder],
   );
 
   const restaurantKeyExtractor = useCallback(
@@ -236,40 +314,54 @@ export default function FavoritesScreen() {
         onPress={handleBrowseRestaurants}
         activeOpacity={0.8}
       >
-        <Text style={styles.browseButtonText}>Browse restaurants</Text>
+        <Ionicons name="compass-outline" size={18} color={Colors.white} />
+        <Text style={styles.browseButtonText}>Explore Restaurants</Text>
       </TouchableOpacity>
     </View>
   );
 
+  const totalFavorites = favoriteRestaurants.length + favoriteDishes.length;
   const currentData =
     activeTab === 'restaurants' ? favoriteRestaurants : favoriteDishes;
   const isEmpty = currentData.length === 0;
+
+  const tabTranslateX = tabIndicatorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.xs * 2) / 2],
+  });
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Favorites</Text>
+        <View>
+          <Text style={styles.title}>Favorites</Text>
+          <Text style={styles.subtitle}>
+            {totalFavorites} saved item{totalFavorites !== 1 ? 's' : ''}
+          </Text>
+        </View>
       </View>
 
       {/* Tab Switcher */}
       <View style={styles.tabContainer}>
-        <TouchableOpacity
+        <Animated.View
           style={[
-            styles.tab,
-            activeTab === 'restaurants' && styles.tabActive,
+            styles.tabIndicator,
+            { transform: [{ translateX: tabTranslateX }] },
           ]}
-          onPress={() => setActiveTab('restaurants')}
+        />
+        <TouchableOpacity
+          style={styles.tab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setActiveTab('restaurants');
+          }}
           activeOpacity={0.7}
         >
           <Ionicons
-            name="restaurant-outline"
+            name={activeTab === 'restaurants' ? 'restaurant' : 'restaurant-outline'}
             size={16}
-            color={
-              activeTab === 'restaurants'
-                ? Colors.white
-                : Colors.text.secondary
-            }
+            color={activeTab === 'restaurants' ? Colors.white : Colors.text.secondary}
           />
           <Text
             style={[
@@ -279,23 +371,26 @@ export default function FavoritesScreen() {
           >
             Restaurants
           </Text>
+          {favoriteRestaurants.length > 0 && (
+            <View style={[styles.tabBadge, activeTab === 'restaurants' && styles.tabBadgeActive]}>
+              <Text style={[styles.tabBadgeText, activeTab === 'restaurants' && styles.tabBadgeTextActive]}>
+                {favoriteRestaurants.length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
         <TouchableOpacity
-          style={[
-            styles.tab,
-            activeTab === 'dishes' && styles.tabActive,
-          ]}
-          onPress={() => setActiveTab('dishes')}
+          style={styles.tab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setActiveTab('dishes');
+          }}
           activeOpacity={0.7}
         >
           <Ionicons
-            name="fast-food-outline"
+            name={activeTab === 'dishes' ? 'fast-food' : 'fast-food-outline'}
             size={16}
-            color={
-              activeTab === 'dishes'
-                ? Colors.white
-                : Colors.text.secondary
-            }
+            color={activeTab === 'dishes' ? Colors.white : Colors.text.secondary}
           />
           <Text
             style={[
@@ -305,6 +400,13 @@ export default function FavoritesScreen() {
           >
             Dishes
           </Text>
+          {favoriteDishes.length > 0 && (
+            <View style={[styles.tabBadge, activeTab === 'dishes' && styles.tabBadgeActive]}>
+              <Text style={[styles.tabBadgeText, activeTab === 'dishes' && styles.tabBadgeTextActive]}>
+                {favoriteDishes.length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -314,17 +416,21 @@ export default function FavoritesScreen() {
       ) : activeTab === 'restaurants' ? (
         <FlatList
           data={favoriteRestaurants}
-          renderItem={renderRestaurantItem}
+          renderItem={renderRestaurantCard}
           keyExtractor={restaurantKeyExtractor}
-          contentContainerStyle={styles.listContent}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          contentContainerStyle={styles.gridContent}
           showsVerticalScrollIndicator={false}
         />
       ) : (
         <FlatList
           data={favoriteDishes}
-          renderItem={renderDishItem}
+          renderItem={renderDishCard}
           keyExtractor={dishKeyExtractor}
-          contentContainerStyle={styles.listContent}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          contentContainerStyle={styles.gridContent}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -350,16 +456,33 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     letterSpacing: -0.5,
   },
+  subtitle: {
+    fontSize: FontSize.md,
+    fontWeight: '500',
+    color: Colors.text.secondary,
+    marginTop: 2,
+  },
 
   // Tab Switcher
   tabContainer: {
     flexDirection: 'row',
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
     marginBottom: Spacing.lg,
     backgroundColor: Colors.gray[100],
     borderRadius: BorderRadius.xl,
     padding: Spacing.xs,
+    position: 'relative',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    top: Spacing.xs,
+    left: Spacing.xs,
+    width: '50%',
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.lg,
+    ...Shadows.small,
   },
   tab: {
     flex: 1,
@@ -369,10 +492,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
     gap: Spacing.xs,
-  },
-  tabActive: {
-    backgroundColor: Colors.primary,
-    ...Shadows.small,
+    zIndex: 1,
   },
   tabText: {
     fontSize: FontSize.md,
@@ -382,120 +502,132 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: Colors.white,
   },
+  tabBadge: {
+    backgroundColor: Colors.gray[200],
+    borderRadius: BorderRadius.full,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  tabBadgeActive: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  tabBadgeText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.text.secondary,
+  },
+  tabBadgeTextActive: {
+    color: Colors.white,
+  },
 
-  // List
-  listContent: {
+  // Pinterest Grid
+  gridContent: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.xxxl,
   },
+  gridRow: {
+    justifyContent: 'space-between',
+    marginBottom: GRID_GAP,
+  },
 
-  // Restaurant Card
-  restaurantCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
+  // Pinterest Card
+  pinterestCard: {
+    width: CARD_WIDTH,
+    borderRadius: BorderRadius.xl,
     overflow: 'hidden',
-    marginBottom: Spacing.md,
-    ...Shadows.small,
+    backgroundColor: Colors.gray[100],
+    ...Shadows.medium,
   },
-  restaurantImage: {
-    width: 100,
-    height: 110,
+  pinterestImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
   },
-  restaurantInfo: {
+  pinterestGradient: {
     flex: 1,
-    padding: Spacing.md,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
   },
-  restaurantName: {
+  pinterestContent: {
+    padding: Spacing.md,
+  },
+  pinterestName: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    color: Colors.white,
+    marginBottom: 4,
   },
-  restaurantMeta: {
+  pinterestMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.xs,
+    gap: Spacing.sm,
+    marginBottom: 2,
   },
-  ratingContainer: {
+  pinterestRating: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
   },
-  ratingText: {
+  pinterestRatingText: {
     fontSize: FontSize.sm,
     fontWeight: '700',
-    color: Colors.text.primary,
+    color: Colors.white,
   },
-  metaDot: {
-    width: 3,
-    height: 3,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.text.light,
-    marginHorizontal: Spacing.xs,
+  pinterestDelivery: {
+    fontSize: FontSize.xs,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
   },
-  metaText: {
+  pinterestCuisine: {
+    fontSize: FontSize.xs,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  pinterestRestaurantName: {
     fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    flex: 1,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: Spacing.sm,
   },
-  restaurantSubMeta: {
+  pinterestDishBottom: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
+    justifyContent: 'space-between',
   },
-  subMetaText: {
-    fontSize: FontSize.xs,
-    color: Colors.text.light,
+  pinterestPrice: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.white,
   },
-  metaDotSmall: {
-    width: 2,
-    height: 2,
+  pinterestHeart: {
+    position: 'absolute',
+    top: Spacing.sm,
+    right: Spacing.sm,
+    width: 34,
+    height: 34,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.text.light,
-  },
-
-  // Dish Card
-  dishCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    marginBottom: Spacing.md,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
     ...Shadows.small,
   },
-  dishImage: {
-    width: 100,
-    height: 100,
-  },
-  dishInfo: {
-    flex: 1,
-    padding: Spacing.md,
-    justifyContent: 'center',
-  },
-  dishName: {
-    fontSize: FontSize.lg,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: 2,
-  },
-  dishRestaurant: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    marginBottom: Spacing.xs,
-  },
-  dishPrice: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
 
-  // Remove Button
-  removeButton: {
-    justifyContent: 'center',
+  // Quick Re-order Button
+  quickReorderBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+  },
+  quickReorderText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.white,
   },
 
   // Empty State
@@ -528,6 +660,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xxl,
   },
   browseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.xxxl,
     paddingVertical: Spacing.md,

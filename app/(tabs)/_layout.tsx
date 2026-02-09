@@ -8,6 +8,7 @@ import { useCartStore } from '@/store/cartStore';
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const itemCount = useCartStore((s) => s.getItemCount());
+  const activeOrderCount = useCartStore((s) => s.getActiveOrderCount());
 
   return (
     <Tabs
@@ -61,7 +62,16 @@ export default function TabLayout() {
         options={{
           title: 'Orders',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="receipt" size={size} color={color} />
+            <View>
+              <Ionicons name="receipt" size={size} color={color} />
+              {activeOrderCount > 0 && (
+                <View style={styles.orderBadge}>
+                  <Text style={styles.orderBadgeText}>
+                    {activeOrderCount > 9 ? '9+' : activeOrderCount}
+                  </Text>
+                </View>
+              )}
+            </View>
           ),
         }}
       />
@@ -101,6 +111,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   badgeText: {
+    color: Colors.white,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  orderBadge: {
+    position: 'absolute',
+    right: -8,
+    top: -4,
+    backgroundColor: Colors.success,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  orderBadgeText: {
     color: Colors.white,
     fontSize: 10,
     fontWeight: '700',

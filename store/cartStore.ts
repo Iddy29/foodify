@@ -18,6 +18,9 @@ interface CartState {
   getTotal: () => number;
   getItemCount: () => number;
   addOrder: (order: Order) => void;
+  updateOrderStatus: (orderId: string, status: Order['status']) => void;
+  getActiveOrders: () => Order[];
+  getActiveOrderCount: () => number;
   loadFromStorage: () => Promise<void>;
 }
 
@@ -102,6 +105,22 @@ export const useCartStore = create<CartState>((set, get) => ({
     const newOrders = [order, ...get().orders];
     set({ orders: newOrders });
     saveOrdersToStorage(newOrders);
+  },
+
+  updateOrderStatus: (orderId: string, status: Order['status']) => {
+    const newOrders = get().orders.map((o) =>
+      o.id === orderId ? { ...o, status } : o
+    );
+    set({ orders: newOrders });
+    saveOrdersToStorage(newOrders);
+  },
+
+  getActiveOrders: () => {
+    return get().orders.filter((o) => o.status !== 'arrived');
+  },
+
+  getActiveOrderCount: () => {
+    return get().orders.filter((o) => o.status !== 'arrived').length;
   },
 
   loadFromStorage: async () => {
