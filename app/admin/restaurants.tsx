@@ -12,9 +12,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { useAdminStore, Restaurant } from '@/store/adminStore';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 
@@ -31,6 +33,12 @@ interface RestaurantFormData {
   cover_image: string;
   featured: boolean;
   is_active: boolean;
+}
+
+interface ImageFile {
+  uri: string;
+  name: string;
+  type: string;
 }
 
 const INITIAL_FORM_DATA: RestaurantFormData = {
@@ -69,6 +77,8 @@ export default function RestaurantsManagement() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingRestaurant, setEditingRestaurant] = useState<Restaurant | null>(null);
   const [formData, setFormData] = useState<RestaurantFormData>(INITIAL_FORM_DATA);
+  const [selectedLogo, setSelectedLogo] = useState<ImageFile | null>(null);
+  const [selectedCover, setSelectedCover] = useState<ImageFile | null>(null);
 
   useEffect(() => {
     fetchRestaurants();
@@ -77,6 +87,8 @@ export default function RestaurantsManagement() {
   const handleAdd = () => {
     setEditingRestaurant(null);
     setFormData(INITIAL_FORM_DATA);
+    setSelectedLogo(null);
+    setSelectedCover(null);
     setModalVisible(true);
   };
 
@@ -96,6 +108,8 @@ export default function RestaurantsManagement() {
       featured: restaurant.featured,
       is_active: restaurant.is_active,
     });
+    setSelectedLogo(null);
+    setSelectedCover(null);
     setModalVisible(true);
   };
 
@@ -136,6 +150,35 @@ export default function RestaurantsManagement() {
     }
   };
 
+  const handlePickImage = async (type: 'logo' | 'cover') => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to photo library');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: type === 'logo' ? [1, 1] : [16, 9],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const imageFile = {
+        uri: asset.uri,
+        name: asset.fileName || 'image.jpg',
+        type: asset.mimeType || 'image/jpeg',
+      };
+      if (type === 'logo') {
+        setSelectedLogo(imageFile);
+      } else {
+        setSelectedCover(imageFile);
+      }
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim() || !formData.description.trim() || !formData.address.trim()) {
       Alert.alert('Error', 'Name, description, and address are required');
@@ -149,13 +192,20 @@ export default function RestaurantsManagement() {
     };
 
     try {
+      const imageFiles = {
+        ...(selectedLogo && { image: selectedLogo }),
+        ...(selectedCover && { cover_image: selectedCover }),
+      };
+
       if (editingRestaurant) {
-        await updateRestaurant(editingRestaurant.id, data);
+        await updateRestaurant(editingRestaurant.id, data, Object.keys(imageFiles).length > 0 ? imageFiles : undefined);
       } else {
-        await createRestaurant(data);
+        await createRestaurant(data, Object.keys(imageFiles).length > 0 ? imageFiles : undefined);
       }
       setModalVisible(false);
       setFormData(INITIAL_FORM_DATA);
+      setSelectedLogo(null);
+      setSelectedCover(null);
     } catch {
       // Error handled by store
     }
@@ -391,25 +441,57 @@ export default function RestaurantsManagement() {
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Logo Image URL</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.image}
-                  onChangeText={(text) => setFormData({ ...formData, image: text })}
-                  placeholder="https://..."
-                  placeholderTextColor={Colors.text.light}
-                />
+                <Text style={styles.label}>Logo Image</Text>
+                <TouchableOpacity style={styles.imagePicker} onPress={() => handlePickImage('logo')}>
+                  {selectedLogo ? (
+                    <Image source={{ uri: selectedLogo.uri }} style={styles.selectedImage} />
+                  ) : formData.image ? (
+                    <Image source={{ uri: formData.image }} style={styles.selectedImage} />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Ionicons name="restaurant-outline" size={32} color={Colors.text.light} />
+                      <Text style={styles.imagePlaceholderText}>Tap to select logo</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {(selectedLogo || formData.image) && (
+                  <TouchableOpacity
+                    style={styles.removeImageBtn}
+                    onPress={() => {
+                      setSelectedLogo(null);
+                      setFormData({ ...formData, image: '' });
+                    }}
+                  >
+                    <Text style={styles.removeImageText}>Remove Logo</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Cover Image URL</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.cover_image}
-                  onChangeText={(text) => setFormData({ ...formData, cover_image: text })}
-                  placeholder="https://..."
-                  placeholderTextColor={Colors.text.light}
-                />
+                <Text style={styles.label}>Cover Image</Text>
+                <TouchableOpacity style={[styles.imagePicker, styles.coverImagePicker]} onPress={() => handlePickImage('cover')}>
+                  {selectedCover ? (
+                    <Image source={{ uri: selectedCover.uri }} style={styles.selectedImage} />
+                  ) : formData.cover_image ? (
+                    <Image source={{ uri: formData.cover_image }} style={styles.selectedImage} />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Ionicons name="image-outline" size={32} color={Colors.text.light} />
+                      <Text style={styles.imagePlaceholderText}>Tap to select cover image</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {(selectedCover || formData.cover_image) && (
+                  <TouchableOpacity
+                    style={styles.removeImageBtn}
+                    onPress={() => {
+                      setSelectedCover(null);
+                      setFormData({ ...formData, cover_image: '' });
+                    }}
+                  >
+                    <Text style={styles.removeImageText}>Remove Cover</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.formRow}>
@@ -747,5 +829,44 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: FontSize.md,
     fontWeight: '700',
+  },
+  imagePicker: {
+    width: 120,
+    height: 120,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 2,
+    borderColor: Colors.gray[200],
+    borderStyle: 'dashed',
+    overflow: 'hidden',
+  },
+  coverImagePicker: {
+    width: '100%',
+    height: 160,
+  },
+  selectedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  imagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[100],
+  },
+  imagePlaceholderText: {
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    color: Colors.text.light,
+    textAlign: 'center',
+  },
+  removeImageBtn: {
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  removeImageText: {
+    color: Colors.danger,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
   },
 });

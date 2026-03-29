@@ -153,23 +153,23 @@ interface AdminState {
   
   // Actions - Categories
   fetchCategories: () => Promise<void>;
-  createCategory: (data: Partial<Category>) => Promise<void>;
-  updateCategory: (id: number, data: Partial<Category>) => Promise<void>;
+  createCategory: (data: Partial<Category>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
+  updateCategory: (id: number, data: Partial<Category>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
   deleteCategory: (id: number) => Promise<void>;
   toggleCategory: (id: number) => Promise<void>;
   
   // Actions - Restaurants
   fetchRestaurants: () => Promise<void>;
-  createRestaurant: (data: Partial<Restaurant>) => Promise<void>;
-  updateRestaurant: (id: number, data: Partial<Restaurant>) => Promise<void>;
+  createRestaurant: (data: Partial<Restaurant>, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => Promise<void>;
+  updateRestaurant: (id: number, data: Partial<Restaurant>, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => Promise<void>;
   deleteRestaurant: (id: number) => Promise<void>;
   toggleRestaurant: (id: number) => Promise<void>;
   toggleRestaurantFeatured: (id: number) => Promise<void>;
   
   // Actions - Menu Items
   fetchMenuItems: (restaurantId?: number) => Promise<void>;
-  createMenuItem: (data: Partial<MenuItem>) => Promise<void>;
-  updateMenuItem: (id: number, data: Partial<MenuItem>) => Promise<void>;
+  createMenuItem: (data: Partial<MenuItem>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
+  updateMenuItem: (id: number, data: Partial<MenuItem>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
   deleteMenuItem: (id: number) => Promise<void>;
   toggleMenuItem: (id: number) => Promise<void>;
   toggleMenuItemPopular: (id: number) => Promise<void>;
@@ -216,6 +216,45 @@ async function apiRequest<T>(
   if (body && method !== 'GET') {
     options.body = JSON.stringify(body);
   }
+
+  const res = await fetch(`${BASE_URL}${path}`, options);
+  const json = await res.json();
+
+  if (!res.ok) {
+    const firstError =
+      json?.errors
+        ? Object.values(json.errors as Record<string, string[]>)[0]?.[0]
+        : json?.message;
+    throw new Error(firstError ?? 'Something went wrong. Please try again.');
+  }
+
+  return json as T;
+}
+
+/**
+ * Helper for multipart/form-data requests (file uploads).
+ */
+async function apiRequestFormData<T>(
+  path: string,
+  method: string = 'POST',
+  formData: FormData,
+): Promise<T> {
+  const token = useAuthStore.getState().token;
+  
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  // Note: Don't set Content-Type for FormData - browser/fetch will set it with boundary
+
+  const options: RequestInit = {
+    method,
+    headers,
+    body: formData,
+  };
 
   const res = await fetch(`${BASE_URL}${path}`, options);
   const json = await res.json();
@@ -280,10 +319,20 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  createCategory: async (data) => {
+  createCategory: async (data, imageFile?: { uri: string; name: string; type: string }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest('/api/admin/categories', 'POST', data);
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append('name', data.name || '');
+        formData.append('icon', data.icon || '');
+        formData.append('sort_order', String(data.sort_order ?? 0));
+        formData.append('is_active', String(data.is_active ?? true));
+        formData.append('image', imageFile as unknown as Blob);
+        await apiRequestFormData('/api/admin/categories', 'POST', formData);
+      } else {
+        await apiRequest('/api/admin/categories', 'POST', data);
+      }
       await get().fetchCategories();
       set({ isLoading: false });
     } catch (err) {
@@ -295,10 +344,22 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateCategory: async (id, data) => {
+  updateCategory: async (id, data, imageFile?: { uri: string; name: string; type: string }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest(`/api/admin/categories/${id}`, 'PUT', data);
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append('name', data.name || '');
+        formData.append('icon', data.icon || '');
+        formData.append('sort_order', String(data.sort_order ?? 0));
+        formData.append('is_active', String(data.is_active ?? true));
+        formData.append('image', imageFile as unknown as Blob);
+        // Use POST with _method=PUT for Laravel to handle file uploads on PUT
+        formData.append('_method', 'PUT');
+        await apiRequestFormData(`/api/admin/categories/${id}`, 'POST', formData);
+      } else {
+        await apiRequest(`/api/admin/categories/${id}`, 'PUT', data);
+      }
       await get().fetchCategories();
       set({ isLoading: false });
     } catch (err) {
@@ -349,10 +410,30 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  createRestaurant: async (data) => {
+  createRestaurant: async (data, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest('/api/admin/restaurants', 'POST', data);
+      if (imageFiles && (imageFiles.image || imageFiles.cover_image)) {
+        const formData = new FormData();
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            if (Array.isArray(value)) {
+              formData.append(key, JSON.stringify(value));
+            } else {
+              formData.append(key, String(value));
+            }
+          }
+        });
+        if (imageFiles.image) {
+          formData.append('image', imageFiles.image as unknown as Blob);
+        }
+        if (imageFiles.cover_image) {
+          formData.append('cover_image', imageFiles.cover_image as unknown as Blob);
+        }
+        await apiRequestFormData('/api/admin/restaurants', 'POST', formData);
+      } else {
+        await apiRequest('/api/admin/restaurants', 'POST', data);
+      }
       await get().fetchRestaurants();
       set({ isLoading: false });
     } catch (err) {
@@ -364,10 +445,31 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateRestaurant: async (id, data) => {
+  updateRestaurant: async (id, data, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest(`/api/admin/restaurants/${id}`, 'PUT', data);
+      if (imageFiles && (imageFiles.image || imageFiles.cover_image)) {
+        const formData = new FormData();
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            if (Array.isArray(value)) {
+              formData.append(key, JSON.stringify(value));
+            } else {
+              formData.append(key, String(value));
+            }
+          }
+        });
+        if (imageFiles.image) {
+          formData.append('image', imageFiles.image as unknown as Blob);
+        }
+        if (imageFiles.cover_image) {
+          formData.append('cover_image', imageFiles.cover_image as unknown as Blob);
+        }
+        formData.append('_method', 'PUT');
+        await apiRequestFormData(`/api/admin/restaurants/${id}`, 'POST', formData);
+      } else {
+        await apiRequest(`/api/admin/restaurants/${id}`, 'PUT', data);
+      }
       await get().fetchRestaurants();
       set({ isLoading: false });
     } catch (err) {
@@ -431,10 +533,25 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  createMenuItem: async (data) => {
+  createMenuItem: async (data, imageFile?: { uri: string; name: string; type: string }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest('/api/admin/menu-items', 'POST', data);
+      if (imageFile) {
+        const formData = new FormData();
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            if (Array.isArray(value)) {
+              formData.append(key, JSON.stringify(value));
+            } else {
+              formData.append(key, String(value));
+            }
+          }
+        });
+        formData.append('image', imageFile as unknown as Blob);
+        await apiRequestFormData('/api/admin/menu-items', 'POST', formData);
+      } else {
+        await apiRequest('/api/admin/menu-items', 'POST', data);
+      }
       await get().fetchMenuItems();
       set({ isLoading: false });
     } catch (err) {
@@ -446,10 +563,26 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateMenuItem: async (id, data) => {
+  updateMenuItem: async (id, data, imageFile?: { uri: string; name: string; type: string }) => {
     set({ isLoading: true, error: null });
     try {
-      await apiRequest(`/api/admin/menu-items/${id}`, 'PUT', data);
+      if (imageFile) {
+        const formData = new FormData();
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            if (Array.isArray(value)) {
+              formData.append(key, JSON.stringify(value));
+            } else {
+              formData.append(key, String(value));
+            }
+          }
+        });
+        formData.append('image', imageFile as unknown as Blob);
+        formData.append('_method', 'PUT');
+        await apiRequestFormData(`/api/admin/menu-items/${id}`, 'POST', formData);
+      } else {
+        await apiRequest(`/api/admin/menu-items/${id}`, 'PUT', data);
+      }
       await get().fetchMenuItems();
       set({ isLoading: false });
     } catch (err) {

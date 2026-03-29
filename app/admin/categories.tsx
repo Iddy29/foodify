@@ -11,22 +11,33 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { useAdminStore, Category } from '@/store/adminStore';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 
 interface CategoryFormData {
   name: string;
   icon: string;
+  image: string;
   sort_order: number;
   is_active: boolean;
+}
+
+interface ImageFile {
+  uri: string;
+  name: string;
+  type: string;
 }
 
 const INITIAL_FORM_DATA: CategoryFormData = {
   name: '',
   icon: '🍽️',
+  image: '',
   sort_order: 0,
   is_active: true,
 };
@@ -51,6 +62,7 @@ export default function CategoriesManagement() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [formData, setFormData] = useState<CategoryFormData>(INITIAL_FORM_DATA);
+  const [selectedImage, setSelectedImage] = useState<ImageFile | null>(null);
 
   useEffect(() => {
     fetchCategories();
@@ -59,6 +71,7 @@ export default function CategoriesManagement() {
   const handleAdd = () => {
     setEditingCategory(null);
     setFormData(INITIAL_FORM_DATA);
+    setSelectedImage(null);
     setModalVisible(true);
   };
 
@@ -67,9 +80,11 @@ export default function CategoriesManagement() {
     setFormData({
       name: category.name,
       icon: category.icon || '🍽️',
+      image: category.image || '',
       sort_order: category.sort_order,
       is_active: category.is_active,
     });
+    setSelectedImage(null);
     setModalVisible(true);
   };
 
@@ -102,6 +117,30 @@ export default function CategoriesManagement() {
     }
   };
 
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to photo library');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setSelectedImage({
+        uri: asset.uri,
+        name: asset.fileName || 'image.jpg',
+        type: asset.mimeType || 'image/jpeg',
+      });
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim()) {
       Alert.alert('Error', 'Category name is required');
@@ -110,12 +149,13 @@ export default function CategoriesManagement() {
 
     try {
       if (editingCategory) {
-        await updateCategory(editingCategory.id, formData);
+        await updateCategory(editingCategory.id, formData, selectedImage || undefined);
       } else {
-        await createCategory(formData);
+        await createCategory(formData, selectedImage || undefined);
       }
       setModalVisible(false);
       setFormData(INITIAL_FORM_DATA);
+      setSelectedImage(null);
     } catch {
       // Error is handled by store
     }
@@ -124,7 +164,11 @@ export default function CategoriesManagement() {
   const renderCategory = ({ item }: { item: Category }) => (
     <View style={styles.categoryCard}>
       <View style={styles.categoryInfo}>
-        <Text style={styles.categoryIcon}>{item.icon || '🍽️'}</Text>
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.categoryImage} />
+        ) : (
+          <Text style={styles.categoryIcon}>{item.icon || '🍽️'}</Text>
+        )}
         <View style={styles.categoryDetails}>
           <Text style={styles.categoryName}>{item.name}</Text>
           <Text style={styles.categoryMeta}>
@@ -210,6 +254,7 @@ export default function CategoriesManagement() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
+          <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
@@ -232,7 +277,34 @@ export default function CategoriesManagement() {
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Icon</Text>
+              <Text style={styles.label}>Category Image (Optional)</Text>
+              <TouchableOpacity style={styles.imagePicker} onPress={handlePickImage}>
+                {selectedImage ? (
+                  <Image source={{ uri: selectedImage.uri }} style={styles.selectedImage} />
+                ) : formData.image ? (
+                  <Image source={{ uri: formData.image }} style={styles.selectedImage} />
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <Ionicons name="image-outline" size={32} color={Colors.text.light} />
+                    <Text style={styles.imagePlaceholderText}>Tap to select image</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              {(selectedImage || formData.image) && (
+                <TouchableOpacity
+                  style={styles.removeImageBtn}
+                  onPress={() => {
+                    setSelectedImage(null);
+                    setFormData({ ...formData, image: '' });
+                  }}
+                >
+                  <Text style={styles.removeImageText}>Remove Image</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Or Select Icon</Text>
               <View style={styles.emojiGrid}>
                 {EMOJI_OPTIONS.map((emoji) => (
                   <TouchableOpacity
@@ -290,6 +362,7 @@ export default function CategoriesManagement() {
               )}
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -469,6 +542,54 @@ const styles = StyleSheet.create({
   },
   emojiText: {
     fontSize: 24,
+  },
+  categoryImage: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.lg,
+    marginRight: Spacing.md,
+  },
+  imagePicker: {
+    width: 120,
+    height: 120,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 2,
+    borderColor: Colors.gray[200],
+    borderStyle: 'dashed',
+    overflow: 'hidden',
+  },
+  selectedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  imagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[100],
+  },
+  imagePlaceholderText: {
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    color: Colors.text.light,
+    textAlign: 'center',
+  },
+  removeImageBtn: {
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  removeImageText: {
+    color: Colors.danger,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   switchRow: {
     flexDirection: 'row',

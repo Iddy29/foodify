@@ -12,9 +12,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { useAdminStore, MenuItem, Restaurant } from '@/store/adminStore';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 
@@ -28,6 +30,12 @@ interface MenuItemFormData {
   ingredients: string;
   popular: boolean;
   is_active: boolean;
+}
+
+interface ImageFile {
+  uri: string;
+  name: string;
+  type: string;
 }
 
 const INITIAL_FORM_DATA: MenuItemFormData = {
@@ -65,6 +73,7 @@ export default function ProductsManagement() {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [formData, setFormData] = useState<MenuItemFormData>(INITIAL_FORM_DATA);
   const [selectedRestaurant, setSelectedRestaurant] = useState<number | null>(null);
+  const [selectedImage, setSelectedImage] = useState<ImageFile | null>(null);
 
   useEffect(() => {
     fetchMenuItems();
@@ -74,6 +83,7 @@ export default function ProductsManagement() {
   const handleAdd = () => {
     setEditingItem(null);
     setFormData(INITIAL_FORM_DATA);
+    setSelectedImage(null);
     setModalVisible(true);
   };
 
@@ -90,6 +100,7 @@ export default function ProductsManagement() {
       popular: item.popular,
       is_active: item.is_active,
     });
+    setSelectedImage(null);
     setModalVisible(true);
   };
 
@@ -130,6 +141,30 @@ export default function ProductsManagement() {
     }
   };
 
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to photo library');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setSelectedImage({
+        uri: asset.uri,
+        name: asset.fileName || 'image.jpg',
+        type: asset.mimeType || 'image/jpeg',
+      });
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim() || !formData.restaurant_id || !formData.price || !formData.category) {
       Alert.alert('Error', 'Please fill in all required fields');
@@ -144,12 +179,13 @@ export default function ProductsManagement() {
 
     try {
       if (editingItem) {
-        await updateMenuItem(editingItem.id, data);
+        await updateMenuItem(editingItem.id, data, selectedImage || undefined);
       } else {
-        await createMenuItem(data);
+        await createMenuItem(data, selectedImage || undefined);
       }
       setModalVisible(false);
       setFormData(INITIAL_FORM_DATA);
+      setSelectedImage(null);
     } catch {
       // Error handled by store
     }
@@ -385,14 +421,30 @@ export default function ProductsManagement() {
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Image URL</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.image}
-                  onChangeText={(text) => setFormData({ ...formData, image: text })}
-                  placeholder="https://..."
-                  placeholderTextColor={Colors.text.light}
-                />
+                <Text style={styles.label}>Product Image</Text>
+                <TouchableOpacity style={styles.imagePicker} onPress={handlePickImage}>
+                  {selectedImage ? (
+                    <Image source={{ uri: selectedImage.uri }} style={styles.selectedImage} />
+                  ) : formData.image ? (
+                    <Image source={{ uri: formData.image }} style={styles.selectedImage} />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Ionicons name="camera-outline" size={32} color={Colors.text.light} />
+                      <Text style={styles.imagePlaceholderText}>Tap to select image</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {(selectedImage || formData.image) && (
+                  <TouchableOpacity
+                    style={styles.removeImageBtn}
+                    onPress={() => {
+                      setSelectedImage(null);
+                      setFormData({ ...formData, image: '' });
+                    }}
+                  >
+                    <Text style={styles.removeImageText}>Remove Image</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.formGroup}>
@@ -689,6 +741,40 @@ const styles = StyleSheet.create({
   textArea: {
     height: 80,
     textAlignVertical: 'top',
+  },
+  imagePicker: {
+    width: '100%',
+    height: 200,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 2,
+    borderColor: Colors.gray[200],
+    borderStyle: 'dashed',
+    overflow: 'hidden',
+  },
+  selectedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  imagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[100],
+  },
+  imagePlaceholderText: {
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    color: Colors.text.light,
+  },
+  removeImageBtn: {
+    marginTop: Spacing.sm,
+    alignSelf: 'center',
+  },
+  removeImageText: {
+    color: Colors.danger,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
   },
   restaurantChips: {
     flexDirection: 'row',
