@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Image,
   Animated,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -14,8 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
-import { getRestaurantById } from '@/data/mockData';
-import type { MenuItem } from '@/data/mockData';
+import { useDataStore, MenuItem, RestaurantWithMenu } from '@/store/dataStore';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { useCartStore } from '@/store/cartStore';
 
@@ -31,27 +31,57 @@ export default function RestaurantProfileScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
   const [activeTab, setActiveTab] = useState<TabOption>('Menu');
 
-  const restaurant = useMemo(() => (id ? getRestaurantById(id) : undefined), [id]);
+  // Real data from API
+  const {
+    currentRestaurant,
+    isLoadingRestaurant,
+    fetchRestaurant,
+  } = useDataStore();
 
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
   const cartItemCount = useCartStore((s) => s.getItemCount());
   const cartTotal = useCartStore((s) => s.getTotal());
 
+  // Fetch restaurant data
+  useEffect(() => {
+    if (id) {
+      fetchRestaurant(id);
+    }
+  }, [id]);
+
+  const restaurant = currentRestaurant;
+
   const isFavorited = useMemo(
-    () => (restaurant ? isFavorite('restaurant', restaurant.id) : false),
+    () => (restaurant ? isFavorite('restaurant', restaurant.id.toString()) : false),
     [restaurant, isFavorite],
   );
 
   const menuByCategory = useMemo(() => {
-    if (!restaurant) return {};
+    if (!restaurant || !restaurant.menu_items) return {};
     const grouped: Record<string, MenuItem[]> = {};
-    for (const category of restaurant.menuCategories) {
-      const items = restaurant.menu.filter((item) => item.category === category);
+    const categories = restaurant.menu_categories || [];
+    
+    for (const category of categories) {
+      const items = restaurant.menu_items.filter((item) => item.category === category);
       if (items.length > 0) {
         grouped[category] = items;
       }
     }
+    
+    // Also group any items that don't match the predefined categories
+    const otherItems = restaurant.menu_items.filter(
+      (item) => !categories.includes(item.category)
+    );
+    if (otherItems.length > 0) {
+      const uniqueCategories = [...new Set(otherItems.map((item) => item.category))];
+      for (const category of uniqueCategories) {
+        if (!grouped[category]) {
+          grouped[category] = otherItems.filter((item) => item.category === category);
+        }
+      }
+    }
+    
     return grouped;
   }, [restaurant]);
 
@@ -62,7 +92,7 @@ export default function RestaurantProfileScreen() {
   const handleFavoriteToggle = useCallback(() => {
     if (!restaurant) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    toggleFavorite({ type: 'restaurant', id: restaurant.id });
+    toggleFavorite({ type: 'restaurant', id: restaurant.id.toString() });
   }, [restaurant, toggleFavorite]);
 
   const handleMenuItemPress = useCallback(
@@ -96,6 +126,16 @@ export default function RestaurantProfileScreen() {
     outputRange: [2, 1],
     extrapolateRight: 'clamp',
   });
+
+  // Loading state
+  if (isLoadingRestaurant) {
+    return (
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading restaurant...</Text>
+      </View>
+    );
+  }
 
   // Error state: restaurant not found
   if (!restaurant) {
@@ -135,7 +175,11 @@ export default function RestaurantProfileScreen() {
           onPress={() => handleMenuItemPress(item)}
           activeOpacity={0.7}
         >
-          <Image source={{ uri: item.image }} style={styles.menuItemImage} resizeMode="cover" />
+          <Image 
+            source={{ uri: item.image || 'https://via.placeholder.com/400x300' }} 
+            style={styles.menuItemImage} 
+            resizeMode="cover" 
+          />
           <View style={styles.menuItemInfo}>
             <Text style={styles.menuItemName} numberOfLines={1}>
               {item.name}
@@ -144,7 +188,9 @@ export default function RestaurantProfileScreen() {
               {item.description}
             </Text>
             <View style={styles.menuItemBottom}>
-              <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
+              <Text style={styles.menuItemPrice}>
+                ${typeof item.price === 'number' ? item.price.toFixed(2) : parseFloat(item.price || '0').toFixed(2)}
+              </Text>
               {item.popular && (
                 <View style={styles.popularBadge}>
                   <Text style={styles.popularBadgeText}>Popular</Text>
@@ -170,11 +216,19 @@ export default function RestaurantProfileScreen() {
       case 'Menu':
         return (
           <View style={styles.menuContainer}>
-            {restaurant.menuCategories.map((category) => {
-              const items = menuByCategory[category];
-              if (!items || items.length === 0) return null;
-              return renderMenuSection(category, items);
-            })}
+            {Object.keys(menuByCategory).length > 0 ? (
+              Object.entries(menuByCategory).map(([category, items]) =>
+                renderMenuSection(category, items)
+              )
+            ) : (
+              <View style={styles.placeholderContainer}>
+                <Ionicons name="fast-food-outline" size={48} color={Colors.gray[300]} />
+                <Text style={styles.placeholderTitle}>No Menu Items</Text>
+                <Text style={styles.placeholderText}>
+                  This restaurant hasn't added any menu items yet.
+                </Text>
+              </View>
+            )}
           </View>
         );
       case 'Reviews':
@@ -189,12 +243,44 @@ export default function RestaurantProfileScreen() {
         );
       case 'Info':
         return (
-          <View style={styles.placeholderContainer}>
-            <Ionicons name="information-circle-outline" size={48} color={Colors.gray[300]} />
-            <Text style={styles.placeholderTitle}>Restaurant Info</Text>
-            <Text style={styles.placeholderText}>
-              Hours, location details, and more will be available here soon.
-            </Text>
+          <View style={styles.infoTabContainer}>
+            <View style={styles.infoItemRow}>
+              <Ionicons name="location-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Address</Text>
+                <Text style={styles.infoValue}>{restaurant.address}</Text>
+              </View>
+            </View>
+            <View style={styles.infoItemRow}>
+              <Ionicons name="time-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Delivery Time</Text>
+                <Text style={styles.infoValue}>{restaurant.delivery_time}</Text>
+              </View>
+            </View>
+            <View style={styles.infoItemRow}>
+              <Ionicons name="cash-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Delivery Fee</Text>
+                <Text style={styles.infoValue}>
+                  {restaurant.delivery_fee === 0 ? 'Free' : `$${Number(restaurant.delivery_fee).toFixed(2)}`}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.infoItemRow}>
+              <Ionicons name="restaurant-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Cuisine</Text>
+                <Text style={styles.infoValue}>{restaurant.cuisine?.join(', ')}</Text>
+              </View>
+            </View>
+            <View style={styles.infoItemRow}>
+              <Ionicons name="pricetag-outline" size={20} color={Colors.primary} />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Price Range</Text>
+                <Text style={styles.infoValue}>{restaurant.price_range}</Text>
+              </View>
+            </View>
           </View>
         );
       default:
@@ -216,7 +302,7 @@ export default function RestaurantProfileScreen() {
         {/* Cover Image with Parallax */}
         <View style={styles.coverContainer}>
           <Animated.Image
-            source={{ uri: restaurant.coverImage }}
+            source={{ uri: restaurant.cover_image || restaurant.image || 'https://via.placeholder.com/800x400' }}
             style={[
               styles.coverImage,
               {
@@ -240,45 +326,35 @@ export default function RestaurantProfileScreen() {
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color={Colors.star} />
               <Text style={styles.ratingText}>{restaurant.rating}</Text>
-              <Text style={styles.reviewCount}>({restaurant.reviewCount})</Text>
+              <Text style={styles.reviewCount}>({restaurant.review_count})</Text>
             </View>
             <View style={styles.infoDot} />
             <View style={styles.infoItem}>
               <Ionicons name="location-outline" size={14} color={Colors.text.secondary} />
-              <Text style={styles.infoText}>{restaurant.distance}</Text>
+              <Text style={styles.infoText}>{restaurant.distance || 'Nearby'}</Text>
             </View>
             <View style={styles.infoDot} />
             <View style={styles.infoItem}>
               <Ionicons name="time-outline" size={14} color={Colors.text.secondary} />
-              <Text style={styles.infoText}>{restaurant.deliveryTime}</Text>
-            </View>
-            <View style={styles.infoDot} />
-            <View style={styles.infoItem}>
-              <Ionicons name="bicycle-outline" size={14} color={Colors.text.secondary} />
-              <Text style={styles.infoText}>
-                {restaurant.deliveryFee === 0 ? 'Free' : `$${restaurant.deliveryFee.toFixed(2)}`}
-              </Text>
-            </View>
-          </View>
-
-          {/* Cuisine Tags */}
-          <View style={styles.cuisineRow}>
-            {restaurant.cuisine.map((tag) => (
-              <View key={tag} style={styles.cuisineChip}>
-                <Text style={styles.cuisineChipText}>{tag}</Text>
-              </View>
-            ))}
-            <View style={styles.priceChip}>
-              <Text style={styles.priceChipText}>{restaurant.priceRange}</Text>
+              <Text style={styles.infoText}>{restaurant.delivery_time}</Text>
             </View>
           </View>
 
           {/* Description */}
           <Text style={styles.description}>{restaurant.description}</Text>
+
+          {/* Cuisine Tags */}
+          <View style={styles.cuisineContainer}>
+            {restaurant.cuisine?.map((cuisine, index) => (
+              <View key={index} style={styles.cuisineTag}>
+                <Text style={styles.cuisineText}>{cuisine}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
-        {/* Tab Bar */}
-        <View style={styles.tabBar}>
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
           {TAB_OPTIONS.map((tab) => (
             <TouchableOpacity
               key={tab}
@@ -295,43 +371,41 @@ export default function RestaurantProfileScreen() {
         {renderTabContent()}
       </Animated.ScrollView>
 
-      {/* Overlay Navigation Buttons */}
+      {/* Back Button */}
       <TouchableOpacity
-        style={[styles.backButton, { top: insets.top + Spacing.sm }]}
+        style={[styles.backButton, { top: insets.top + Spacing.md }]}
         onPress={handleBack}
         activeOpacity={0.7}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <Ionicons name="arrow-back" size={22} color={Colors.text.primary} />
+        <Ionicons name="arrow-back" size={24} color={Colors.white} />
       </TouchableOpacity>
 
+      {/* Favorite Button */}
       <TouchableOpacity
-        style={[styles.favoriteButton, { top: insets.top + Spacing.sm }]}
+        style={[styles.favoriteButton, { top: insets.top + Spacing.md }]}
         onPress={handleFavoriteToggle}
         activeOpacity={0.7}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
         <Ionicons
           name={isFavorited ? 'heart' : 'heart-outline'}
-          size={22}
-          color={isFavorited ? Colors.primary : Colors.text.primary}
+          size={24}
+          color={isFavorited ? Colors.primary : Colors.white}
         />
       </TouchableOpacity>
 
-      {/* Floating Cart Button */}
+      {/* Cart Button (if items in cart) */}
       {cartItemCount > 0 && (
-        <TouchableOpacity
-          style={[styles.floatingCart, { bottom: insets.bottom + Spacing.lg }]}
-          onPress={handleCartPress}
-          activeOpacity={0.85}
-        >
-          <View style={styles.floatingCartLeft}>
-            <View style={styles.cartCountBadge}>
-              <Text style={styles.cartCountText}>{cartItemCount}</Text>
+        <TouchableOpacity style={styles.cartButton} onPress={handleCartPress} activeOpacity={0.9}>
+          <View style={styles.cartContent}>
+            <View style={styles.cartBadge}>
+              <Text style={styles.cartBadgeText}>{cartItemCount}</Text>
             </View>
-            <Text style={styles.floatingCartText}>View Cart</Text>
+            <View style={styles.cartTextContainer}>
+              <Text style={styles.cartTotal}>${cartTotal.toFixed(2)}</Text>
+              <Text style={styles.cartSubtext}>View Cart</Text>
+            </View>
+            <Ionicons name="arrow-forward" size={20} color={Colors.white} />
           </View>
-          <Text style={styles.floatingCartTotal}>${cartTotal.toFixed(2)}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -343,21 +417,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+  },
+  loadingText: {
+    marginTop: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text.secondary,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingBottom: Spacing.xxxl,
   },
-
-  // Cover Image
   coverContainer: {
     height: COVER_HEIGHT,
     overflow: 'hidden',
-    position: 'relative',
   },
   coverImage: {
-    width: SCREEN_WIDTH,
+    width: '100%',
     height: COVER_HEIGHT,
   },
   coverGradient: {
@@ -365,20 +447,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: COVER_HEIGHT * 0.5,
+    height: 100,
   },
-
-  // Navigation Overlay Buttons
   backButton: {
     position: 'absolute',
     left: Spacing.lg,
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.medium,
   },
   favoriteButton: {
     position: 'absolute',
@@ -386,40 +465,29 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.medium,
   },
-
-  // Restaurant Info Section
   infoSection: {
-    backgroundColor: Colors.white,
-    marginTop: -Spacing.xl,
-    borderTopLeftRadius: BorderRadius.xxl,
-    borderTopRightRadius: BorderRadius.xxl,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xxl,
-    paddingBottom: Spacing.lg,
+    padding: Spacing.lg,
+    backgroundColor: Colors.background,
   },
   restaurantName: {
     fontSize: FontSize.xxxl,
     fontWeight: '800',
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
-    letterSpacing: -0.5,
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
     marginBottom: Spacing.md,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
   },
   ratingText: {
     fontSize: FontSize.md,
@@ -433,83 +501,67 @@ const styles = StyleSheet.create({
   infoDot: {
     width: 4,
     height: 4,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray[300],
+    borderRadius: 2,
+    backgroundColor: Colors.text.light,
+    marginHorizontal: Spacing.sm,
   },
   infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
   },
   infoText: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
-    fontWeight: '500',
-  },
-  cuisineRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  cuisineChip: {
-    backgroundColor: Colors.gray[100],
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.full,
-  },
-  cuisineChipText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    fontWeight: '500',
-  },
-  priceChip: {
-    backgroundColor: Colors.accent,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.full,
-  },
-  priceChipText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.primary,
-    fontWeight: '600',
   },
   description: {
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     lineHeight: 22,
+    marginBottom: Spacing.md,
   },
-
-  // Tab Bar
-  tabBar: {
+  cuisineContainer: {
     flexDirection: 'row',
-    backgroundColor: Colors.white,
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  cuisineTag: {
+    backgroundColor: Colors.primaryLight + '20',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  cuisineText: {
+    fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  tabContainer: {
+    flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    backgroundColor: Colors.background,
   },
   tab: {
     flex: 1,
-    alignItems: 'center',
     paddingVertical: Spacing.md,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    alignItems: 'center',
   },
   activeTab: {
+    borderBottomWidth: 2,
     borderBottomColor: Colors.primary,
   },
   tabText: {
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '600',
-    color: Colors.text.light,
+    color: Colors.text.secondary,
   },
   activeTabText: {
     color: Colors.primary,
   },
-
-  // Menu Section
   menuContainer: {
-    paddingTop: Spacing.lg,
+    padding: Spacing.lg,
   },
   menuSection: {
     marginBottom: Spacing.xl,
@@ -518,7 +570,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.md,
   },
   menuSectionTitle: {
@@ -532,35 +583,32 @@ const styles = StyleSheet.create({
   },
   menuItemCard: {
     flexDirection: 'row',
-    backgroundColor: Colors.white,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
     alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
     ...Shadows.small,
   },
   menuItemImage: {
-    width: 90,
-    height: 90,
-    borderTopLeftRadius: BorderRadius.lg,
-    borderBottomLeftRadius: BorderRadius.lg,
+    width: 80,
+    height: 80,
+    borderRadius: BorderRadius.md,
   },
   menuItemInfo: {
     flex: 1,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
+    marginLeft: Spacing.md,
+    marginRight: Spacing.sm,
   },
   menuItemName: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
+    fontSize: FontSize.md,
+    fontWeight: '700',
     color: Colors.text.primary,
     marginBottom: 2,
   },
   menuItemDescription: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
-    lineHeight: 18,
     marginBottom: Spacing.xs,
   },
   menuItemBottom: {
@@ -569,103 +617,113 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   menuItemPrice: {
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.primary,
   },
   popularBadge: {
-    backgroundColor: Colors.star,
+    backgroundColor: Colors.accent,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.sm,
   },
   popularBadgeText: {
     fontSize: FontSize.xs,
-    fontWeight: '600',
-    color: Colors.white,
+    fontWeight: '700',
+    color: Colors.text.primary,
   },
   addButton: {
     width: 36,
     height: 36,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: Spacing.md,
   },
-
-  // Placeholder Content
   placeholderContainer: {
+    padding: Spacing.xxl,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.xxxl * 2,
-    paddingHorizontal: Spacing.xxl,
   },
   placeholderTitle: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.text.primary,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   placeholderText: {
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
   },
-
-  // Floating Cart
-  floatingCart: {
+  infoTabContainer: {
+    padding: Spacing.lg,
+  },
+  infoItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.lg,
+  },
+  infoTextContainer: {
+    marginLeft: Spacing.md,
+    flex: 1,
+  },
+  infoLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.text.light,
+    marginBottom: 2,
+  },
+  infoValue: {
+    fontSize: FontSize.md,
+    color: Colors.text.primary,
+    fontWeight: '600',
+  },
+  cartButton: {
     position: 'absolute',
+    bottom: Spacing.lg,
     left: Spacing.lg,
     right: Spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.md,
     ...Shadows.large,
   },
-  floatingCartLeft: {
+  cartContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
   },
-  cartCountBadge: {
-    backgroundColor: Colors.primaryDark,
-    borderRadius: BorderRadius.sm,
-    minWidth: 28,
-    height: 28,
+  cartBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
   },
-  cartCountText: {
-    color: Colors.white,
+  cartBadgeText: {
     fontSize: FontSize.md,
     fontWeight: '700',
+    color: Colors.primary,
   },
-  floatingCartText: {
-    color: Colors.white,
+  cartTextContainer: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  cartTotal: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-  },
-  floatingCartTotal: {
     color: Colors.white,
-    fontSize: FontSize.lg,
-    fontWeight: '700',
   },
-
-  // Error State
+  cartSubtext: {
+    fontSize: FontSize.sm,
+    color: 'rgba(255,255,255,0.8)',
+  },
   errorContainer: {
     flex: 1,
-    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xxl,
+    padding: Spacing.xl,
+    backgroundColor: Colors.background,
   },
   errorBackButton: {
     position: 'absolute',
@@ -676,7 +734,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.small,
+    ...Shadows.medium,
   },
   errorTitle: {
     fontSize: FontSize.xxl,
@@ -689,18 +747,17 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.xl,
   },
   errorButton: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.xxxl,
+    paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.lg,
   },
   errorButtonText: {
-    color: Colors.white,
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '700',
+    color: Colors.white,
   },
 });

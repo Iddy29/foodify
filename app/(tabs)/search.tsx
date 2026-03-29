@@ -10,18 +10,14 @@ import {
   ScrollView,
   Dimensions,
   Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
-import {
-  searchRestaurants,
-  categories,
-  getRestaurantsByCategory,
-} from '@/data/mockData';
-import type { Restaurant, Category } from '@/data/mockData';
+import { useDataStore, Category, Restaurant } from '@/store/dataStore';
 import { useFavoritesStore } from '@/store/favoritesStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -36,17 +32,48 @@ export default function SearchScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [localResults, setLocalResults] = useState<Restaurant[]>([]);
+
+  // Real data from API
+  const {
+    categories,
+    restaurants,
+    searchResults,
+    isLoadingRestaurants,
+    isLoadingSearch,
+    fetchCategories,
+    fetchRestaurants,
+    search,
+  } = useDataStore();
 
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchCategories();
+    fetchRestaurants();
+  }, []);
 
   // Handle category param from navigation (e.g., from Home screen)
   useEffect(() => {
     if (params.category) {
       setSelectedCategory(params.category);
       setSearchQuery('');
+      // Filter restaurants by category
+      fetchRestaurants({ category: params.category });
     }
   }, [params.category]);
+
+  // Handle search query changes with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery.trim()) {
+        search(searchQuery.trim());
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Auto-focus the search input on mount (only if no category pre-selected)
   useEffect(() => {
@@ -58,27 +85,18 @@ export default function SearchScreen() {
     }
   }, [params.category]);
 
-  const searchResults = useMemo(() => {
-    if (selectedCategory) {
-      const categoryResults = getRestaurantsByCategory(selectedCategory);
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        return categoryResults.filter(
-          (r) =>
-            r.name.toLowerCase().includes(query) ||
-            r.cuisine.some((c) => c.toLowerCase().includes(query)) ||
-            r.menu.some((m) => m.name.toLowerCase().includes(query))
-        );
-      }
-      return categoryResults;
+  const displayResults = useMemo(() => {
+    if (searchQuery.trim() && searchResults) {
+      return searchResults.restaurants;
     }
-    if (searchQuery.trim()) {
-      return searchRestaurants(searchQuery.trim());
+    if (selectedCategory) {
+      return restaurants;
     }
     return [];
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, searchResults, restaurants]);
 
   const isShowingResults = searchQuery.trim().length > 0 || selectedCategory !== null;
+  const isLoading = isLoadingRestaurants || isLoadingSearch;
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
@@ -92,17 +110,25 @@ export default function SearchScreen() {
   }, []);
 
   const handleCategoryChipPress = useCallback((categoryName: string) => {
-    setSelectedCategory((prev) => (prev === categoryName ? null : categoryName));
-  }, []);
+    setSelectedCategory((prev) => {
+      const newCategory = prev === categoryName ? null : categoryName;
+      if (newCategory) {
+        fetchRestaurants({ category: newCategory });
+      }
+      return newCategory;
+    });
+    setSearchQuery('');
+  }, [fetchRestaurants]);
 
   const handlePopularCategoryPress = useCallback((categoryName: string) => {
     setSelectedCategory(categoryName);
     setSearchQuery('');
+    fetchRestaurants({ category: categoryName });
     Keyboard.dismiss();
-  }, []);
+  }, [fetchRestaurants]);
 
   const handleRestaurantPress = useCallback(
-    (restaurantId: string) => {
+    (restaurantId: string | number) => {
       Keyboard.dismiss();
       router.push(`/restaurant/${restaurantId}` as Href);
     },
@@ -110,9 +136,9 @@ export default function SearchScreen() {
   );
 
   const handleFavoriteToggle = useCallback(
-    (restaurantId: string) => {
+    (restaurantId: string | number) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      toggleFavorite({ type: 'restaurant', id: restaurantId });
+      toggleFavorite({ type: 'restaurant', id: restaurantId.toString() });
     },
     [toggleFavorite],
   );
@@ -129,7 +155,7 @@ export default function SearchScreen() {
           onPress={() => handleCategoryChipPress(item.name)}
           activeOpacity={0.7}
         >
-          <Text style={styles.categoryChipEmoji}>{item.icon}</Text>
+          <Text style={styles.categoryChipEmoji}>{item.icon || '🍽️'}</Text>
           <Text
             style={[
               styles.categoryChipText,
@@ -146,7 +172,7 @@ export default function SearchScreen() {
 
   const renderRestaurantCard = useCallback(
     ({ item }: { item: Restaurant }) => {
-      const favorited = isFavorite('restaurant', item.id);
+      const favorited = isFavorite('restaurant', item.id.toString());
       return (
         <TouchableOpacity
           style={styles.resultCard}
@@ -155,7 +181,7 @@ export default function SearchScreen() {
         >
           <View style={styles.resultImageContainer}>
             <Image
-              source={{ uri: item.image }}
+              source={{ uri: item.image || 'https://via.placeholder.com/600x400' }}
               style={styles.resultImage}
               resizeMode="cover"
             />
@@ -182,8 +208,8 @@ export default function SearchScreen() {
               </View>
             </View>
             <View style={styles.cuisineTags}>
-              {item.cuisine.slice(0, 3).map((cuisine) => (
-                <View key={cuisine} style={styles.cuisineTag}>
+              {item.cuisine?.slice(0, 3).map((cuisine, index) => (
+                <View key={index} style={styles.cuisineTag}>
                   <Text style={styles.cuisineTagText}>{cuisine}</Text>
                 </View>
               ))}
@@ -195,7 +221,7 @@ export default function SearchScreen() {
                   size={14}
                   color={Colors.text.secondary}
                 />
-                <Text style={styles.metaText}>{item.deliveryTime}</Text>
+                <Text style={styles.metaText}>{item.delivery_time}</Text>
               </View>
               <View style={styles.metaDot} />
               <View style={styles.metaItem}>
@@ -204,13 +230,13 @@ export default function SearchScreen() {
                   size={14}
                   color={Colors.text.secondary}
                 />
-                <Text style={styles.metaText}>{item.distance}</Text>
+                <Text style={styles.metaText}>{item.distance || 'Nearby'}</Text>
               </View>
               <View style={styles.metaDot} />
               <Text style={styles.deliveryFee}>
-                {item.deliveryFee === 0
+                {item.delivery_fee === 0
                   ? 'Free delivery'
-                  : `$${item.deliveryFee.toFixed(2)} delivery`}
+                  : `$${Number(item.delivery_fee).toFixed(2)} delivery`}
               </Text>
             </View>
           </View>
@@ -252,92 +278,31 @@ export default function SearchScreen() {
     </View>
   );
 
-  const renderDiscoveryContent = () => (
-    <ScrollView
-      style={styles.discoveryScroll}
-      contentContainerStyle={styles.discoveryContent}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
-      {/* Popular Categories */}
-      <View style={styles.discoverySection}>
-        <Text style={styles.discoverySectionTitle}>Popular Categories</Text>
-        <View style={styles.popularCategoryGrid}>
-          {categories
-            .filter((cat) => POPULAR_CATEGORIES.includes(cat.name))
-            .map((cat) => (
-              <TouchableOpacity
-                key={`popular-${cat.id}`}
-                style={styles.popularCategoryCard}
-                onPress={() => handlePopularCategoryPress(cat.name)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.popularCategoryEmoji}>{cat.icon}</Text>
-                <Text style={styles.popularCategoryName}>{cat.name}</Text>
-              </TouchableOpacity>
-            ))}
-        </View>
-      </View>
-
-      {/* Browse All Categories */}
-      <View style={styles.discoverySection}>
-        <Text style={styles.discoverySectionTitle}>Browse All</Text>
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={`browse-${cat.id}`}
-            style={styles.browseCategoryRow}
-            onPress={() => handlePopularCategoryPress(cat.name)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.browseCategoryLeft}>
-              <View style={styles.browseCategoryIcon}>
-                <Text style={styles.browseCategoryEmoji}>{cat.icon}</Text>
-              </View>
-              <Text style={styles.browseCategoryName}>{cat.name}</Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color={Colors.gray[400]}
-            />
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={{ height: Spacing.xxxl }} />
-    </ScrollView>
-  );
-
-  const renderResultsHeader = () => (
-    <View style={styles.resultsHeader}>
-      <Text style={styles.resultsCount}>
-        {searchResults.length} {searchResults.length === 1 ? 'restaurant' : 'restaurants'} found
-        {selectedCategory ? ` in ${selectedCategory}` : ''}
-      </Text>
-    </View>
-  );
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Search Header */}
-      <View style={styles.searchHeader}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color={Colors.text.light} />
+      {/* Header with Search Bar */}
+      <View style={styles.header}>
+        <View style={styles.searchContainer}>
+          <Ionicons
+            name="search"
+            size={20}
+            color={Colors.text.light}
+            style={styles.searchIcon}
+          />
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
-            placeholder="Search restaurants, cuisines, dishes..."
+            placeholder="Search restaurants, dishes..."
             placeholderTextColor={Colors.text.light}
             value={searchQuery}
             onChangeText={setSearchQuery}
             returnKeyType="search"
-            autoCorrect={false}
             autoCapitalize="none"
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity
               onPress={handleClearSearch}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Ionicons
                 name="close-circle"
@@ -349,37 +314,118 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      {/* Category Filter Chips */}
-      <View style={styles.chipContainer}>
-        <FlatList
-          data={categories}
-          renderItem={renderCategoryChip}
-          keyExtractor={categoryKeyExtractor}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipList}
-          keyboardShouldPersistTaps="handled"
-        />
-      </View>
-
-      {/* Content */}
-      {isShowingResults ? (
-        searchResults.length > 0 ? (
+      {/* Category Chips */}
+      {!isShowingResults && (
+        <View style={styles.categoriesSection}>
+          <Text style={styles.sectionTitle}>Categories</Text>
           <FlatList
-            data={searchResults}
-            renderItem={renderRestaurantCard}
-            keyExtractor={resultKeyExtractor}
-            contentContainerStyle={styles.resultsList}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            ListHeaderComponent={renderResultsHeader}
+            data={categories}
+            renderItem={renderCategoryChip}
+            keyExtractor={categoryKeyExtractor}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoriesList}
           />
-        ) : (
-          renderEmptyState()
-        )
+        </View>
+      )}
+
+      {/* Search Results or Browse Section */}
+      {isShowingResults ? (
+        <>
+          {/* Results Header */}
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsTitle}>
+              {searchQuery.trim()
+                ? `Results for "${searchQuery}"`
+                : selectedCategory
+                ? `${selectedCategory} Restaurants`
+                : 'All Restaurants'}
+            </Text>
+            <Text style={styles.resultsCount}>
+              {displayResults.length} found
+            </Text>
+          </View>
+
+          {/* Results List */}
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={displayResults}
+              renderItem={renderRestaurantCard}
+              keyExtractor={resultKeyExtractor}
+              contentContainerStyle={styles.resultsList}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={renderEmptyState}
+            />
+          )}
+        </>
       ) : (
-        renderDiscoveryContent()
+        <ScrollView
+          style={styles.browseContainer}
+          contentContainerStyle={styles.browseContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Popular Categories */}
+          <View style={styles.popularSection}>
+            <Text style={styles.sectionTitle}>Popular Categories</Text>
+            <View style={styles.popularGrid}>
+              {POPULAR_CATEGORIES.map((category) => (
+                <TouchableOpacity
+                  key={category}
+                  style={styles.popularCard}
+                  onPress={() => handlePopularCategoryPress(category)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.popularCardText}>{category}</Text>
+                  <Ionicons
+                    name="arrow-forward"
+                    size={16}
+                    color={Colors.primary}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* All Restaurants */}
+          <View style={styles.allRestaurantsSection}>
+            <Text style={styles.sectionTitle}>All Restaurants</Text>
+            {isLoadingRestaurants ? (
+              <ActivityIndicator size="large" color={Colors.primary} />
+            ) : (
+              restaurants.slice(0, 10).map((restaurant) => (
+                <TouchableOpacity
+                  key={restaurant.id}
+                  style={styles.allRestaurantCard}
+                  onPress={() => handleRestaurantPress(restaurant.id)}
+                  activeOpacity={0.9}
+                >
+                  <Image
+                    source={{ uri: restaurant.image || 'https://via.placeholder.com/400x300' }}
+                    style={styles.allRestaurantImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.allRestaurantInfo}>
+                    <Text style={styles.allRestaurantName} numberOfLines={1}>
+                      {restaurant.name}
+                    </Text>
+                    <Text style={styles.allRestaurantCuisine} numberOfLines={1}>
+                      {restaurant.cuisine?.join(', ')}
+                    </Text>
+                    <View style={styles.allRestaurantMeta}>
+                      <Ionicons name="star" size={12} color={Colors.star} />
+                      <Text style={styles.allRestaurantRating}>{restaurant.rating}</Text>
+                      <Text style={styles.allRestaurantTime}>• {restaurant.delivery_time}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </ScrollView>
       )}
     </View>
   );
@@ -390,93 +436,102 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-
-  // Search Header
-  searchHeader: {
+  header: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.sm,
+    paddingVertical: Spacing.md,
   },
-  searchInputContainer: {
+  searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    gap: Spacing.sm,
-    ...Shadows.small,
+    paddingVertical: Spacing.sm,
+    ...Shadows.medium,
+  },
+  searchIcon: {
+    marginRight: Spacing.sm,
   },
   searchInput: {
     flex: 1,
     fontSize: FontSize.md,
     color: Colors.text.primary,
-    padding: 0,
+    paddingVertical: Spacing.sm,
   },
-
-  // Category Chips
-  chipContainer: {
-    paddingBottom: Spacing.sm,
+  categoriesSection: {
+    marginTop: Spacing.md,
   },
-  chipList: {
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  categoriesList: {
     paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
+    gap: Spacing.md,
   },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
     gap: Spacing.xs,
+    ...Shadows.small,
   },
   categoryChipSelected: {
     backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
   },
   categoryChipEmoji: {
-    fontSize: FontSize.md,
+    fontSize: 20,
   },
   categoryChipText: {
-    fontSize: FontSize.sm,
+    fontSize: FontSize.md,
     fontWeight: '600',
     color: Colors.text.primary,
   },
   categoryChipTextSelected: {
     color: Colors.white,
   },
-
-  // Results List
-  resultsList: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.xxxl,
-  },
   resultsHeader: {
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.xs,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  resultsTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.text.primary,
   },
   resultsCount: {
     fontSize: FontSize.sm,
-    fontWeight: '600',
     color: Colors.text.secondary,
   },
-
-  // Result Card
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resultsList: {
+    padding: Spacing.lg,
+  },
   resultCard: {
-    flexDirection: 'row',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.xl,
+    marginBottom: Spacing.lg,
     overflow: 'hidden',
-    marginBottom: Spacing.md,
-    ...Shadows.small,
+    ...Shadows.medium,
   },
   resultImageContainer: {
-    width: 120,
-    height: 130,
     position: 'relative',
+    height: 160,
   },
   resultImage: {
     width: '100%',
@@ -484,19 +539,17 @@ const styles = StyleSheet.create({
   },
   heartButton: {
     position: 'absolute',
-    top: Spacing.sm,
-    left: Spacing.sm,
-    width: 32,
-    height: 32,
+    top: Spacing.md,
+    right: Spacing.md,
+    width: 36,
+    height: 36,
     borderRadius: BorderRadius.full,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   resultInfo: {
-    flex: 1,
     padding: Spacing.md,
-    justifyContent: 'center',
   },
   resultHeader: {
     flexDirection: 'row',
@@ -514,19 +567,13 @@ const styles = StyleSheet.create({
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    backgroundColor: Colors.gray[50],
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
+    gap: 4,
   },
   ratingText: {
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.text.primary,
   },
-
-  // Cuisine Tags
   cuisineTags: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -534,18 +581,16 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   cuisineTag: {
-    backgroundColor: Colors.gray[100],
+    backgroundColor: Colors.primaryLight + '15',
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
     borderRadius: BorderRadius.sm,
   },
   cuisineTagText: {
     fontSize: FontSize.xs,
-    color: Colors.text.secondary,
+    color: Colors.primary,
     fontWeight: '500',
   },
-
-  // Meta Info
   resultMeta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -553,130 +598,128 @@ const styles = StyleSheet.create({
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 4,
   },
   metaText: {
-    fontSize: FontSize.xs,
+    fontSize: FontSize.sm,
     color: Colors.text.secondary,
   },
   metaDot: {
-    width: 3,
-    height: 3,
-    borderRadius: BorderRadius.full,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: Colors.text.light,
-    marginHorizontal: Spacing.xs,
+    marginHorizontal: Spacing.sm,
   },
   deliveryFee: {
-    fontSize: FontSize.xs,
-    color: Colors.text.secondary,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.primary,
   },
-
-  // Empty State
   emptyState: {
-    flex: 1,
-    justifyContent: 'center',
+    padding: Spacing.xxl,
     alignItems: 'center',
-    paddingHorizontal: Spacing.xxxl,
   },
   emptyTitle: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.text.primary,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   emptySubtitle: {
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 20,
+    marginBottom: Spacing.lg,
   },
   clearFilterButton: {
-    marginTop: Spacing.xl,
     backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.xxl,
+    paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.lg,
   },
   clearFilterText: {
     fontSize: FontSize.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.white,
   },
-
-  // Discovery Content
-  discoveryScroll: {
+  browseContainer: {
     flex: 1,
   },
-  discoveryContent: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
+  browseContent: {
+    paddingBottom: Spacing.xxxl,
   },
-  discoverySection: {
-    marginBottom: Spacing.xxl,
+  popularSection: {
+    marginTop: Spacing.md,
   },
-  discoverySectionTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: Spacing.md,
-  },
-
-  // Popular Category Grid
-  popularCategoryGrid: {
+  popularGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
-  popularCategoryCard: {
-    width: (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.md * 2) / 3,
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.lg,
-    alignItems: 'center',
-    ...Shadows.small,
-  },
-  popularCategoryEmoji: {
-    fontSize: 32,
-    marginBottom: Spacing.sm,
-  },
-  popularCategoryName: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.primary,
-  },
-
-  // Browse All Category Rows
-  browseCategoryRow: {
+  popularCard: {
+    width: (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.md) / 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: Colors.white,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     ...Shadows.small,
   },
-  browseCategoryLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  browseCategoryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray[50],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  browseCategoryEmoji: {
-    fontSize: 20,
-  },
-  browseCategoryName: {
-    fontSize: FontSize.lg,
+  popularCardText: {
+    fontSize: FontSize.md,
     fontWeight: '600',
     color: Colors.text.primary,
+  },
+  allRestaurantsSection: {
+    marginTop: Spacing.xxl,
+  },
+  allRestaurantCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+    padding: Spacing.md,
+    ...Shadows.small,
+  },
+  allRestaurantImage: {
+    width: 70,
+    height: 70,
+    borderRadius: BorderRadius.md,
+  },
+  allRestaurantInfo: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  allRestaurantName: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  allRestaurantCuisine: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
+    marginBottom: 4,
+  },
+  allRestaurantMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  allRestaurantRating: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.text.primary,
+    marginLeft: 2,
+  },
+  allRestaurantTime: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
   },
 });

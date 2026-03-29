@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,14 @@ import {
   ScrollView,
   TextInput,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
-import { getRestaurantById, getMenuItemById } from '@/data/mockData';
+import { useDataStore, MenuItem, RestaurantWithMenu } from '@/store/dataStore';
 import { useCartStore } from '@/store/cartStore';
 import { useFavoritesStore } from '@/store/favoritesStore';
 
@@ -31,22 +32,34 @@ export default function FoodDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const restaurant = useMemo(
-    () => (restaurantId ? getRestaurantById(restaurantId) : undefined),
-    [restaurantId],
-  );
-
-  const menuItem = useMemo(
-    () => (restaurantId && itemId ? getMenuItemById(restaurantId, itemId) : undefined),
-    [restaurantId, itemId],
-  );
+  // Real data from API
+  const {
+    currentRestaurant,
+    isLoadingRestaurant,
+    fetchRestaurant,
+  } = useDataStore();
 
   const addItem = useCartStore((s) => s.addItem);
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
 
+  // Fetch restaurant data
+  useEffect(() => {
+    if (restaurantId) {
+      fetchRestaurant(restaurantId);
+    }
+  }, [restaurantId]);
+
+  // Find the menu item from the restaurant data
+  const menuItem = useMemo(() => {
+    if (!currentRestaurant || !itemId) return undefined;
+    return currentRestaurant.menu_items?.find(item => item.id.toString() === itemId);
+  }, [currentRestaurant, itemId]);
+
+  const restaurant = currentRestaurant;
+
   const isFavorited = useMemo(
-    () => (menuItem ? isFavorite('dish', menuItem.id) : false),
+    () => (menuItem ? isFavorite('dish', menuItem.id.toString()) : false),
     [menuItem, isFavorite],
   );
 
@@ -55,13 +68,16 @@ export default function FoodDetailScreen() {
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   const selectedSizeData = useMemo(() => {
-    if (!menuItem) return undefined;
+    if (!menuItem || !menuItem.sizes) return undefined;
     return menuItem.sizes.find((s) => s.name === selectedSize);
   }, [menuItem, selectedSize]);
 
   const totalPrice = useMemo(() => {
     if (!selectedSizeData) return 0;
-    return selectedSizeData.price * quantity;
+    const price = typeof selectedSizeData.price === 'number' 
+      ? selectedSizeData.price 
+      : parseFloat(selectedSizeData.price || '0');
+    return price * quantity;
   }, [selectedSizeData, quantity]);
 
   const handleDismiss = useCallback(() => {
@@ -71,7 +87,7 @@ export default function FoodDetailScreen() {
   const handleFavoriteToggle = useCallback(() => {
     if (!menuItem || !restaurantId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    toggleFavorite({ type: 'dish', id: menuItem.id, restaurantId });
+    toggleFavorite({ type: 'dish', id: menuItem.id.toString(), restaurantId });
   }, [menuItem, restaurantId, toggleFavorite]);
 
   const handleSizeSelect = useCallback((size: PortionSize) => {
@@ -96,12 +112,22 @@ export default function FoodDetailScreen() {
       quantity,
       selectedSize: selectedSizeData,
       specialInstructions,
-      restaurantId: restaurant.id,
+      restaurantId: restaurant.id.toString(),
       restaurantName: restaurant.name,
     });
 
     router.back();
   }, [menuItem, selectedSizeData, restaurant, quantity, specialInstructions, addItem, router]);
+
+  // Loading state
+  if (isLoadingRestaurant) {
+    return (
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading item...</Text>
+      </View>
+    );
+  }
 
   // Not found state
   if (!menuItem || !restaurant) {
@@ -126,6 +152,18 @@ export default function FoodDetailScreen() {
     );
   }
 
+  // Default sizes if not provided
+  const sizes = menuItem.sizes && menuItem.sizes.length > 0 
+    ? menuItem.sizes 
+    : [
+        { name: 'Small', price: menuItem.price * 0.8 },
+        { name: 'Medium', price: menuItem.price },
+        { name: 'Large', price: menuItem.price * 1.2 },
+      ];
+
+  const ingredients = menuItem.ingredients || [];
+  const basePrice = typeof menuItem.price === 'number' ? menuItem.price : parseFloat(menuItem.price || '0');
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -138,7 +176,7 @@ export default function FoodDetailScreen() {
         {/* Food Image */}
         <View style={styles.imageContainer}>
           <Image
-            source={{ uri: menuItem.image }}
+            source={{ uri: menuItem.image || 'https://via.placeholder.com/400x300' }}
             style={styles.foodImage}
             resizeMode="cover"
           />
@@ -173,30 +211,33 @@ export default function FoodDetailScreen() {
           {/* Name and Price */}
           <View style={styles.headerSection}>
             <Text style={styles.foodName}>{menuItem.name}</Text>
-            <Text style={styles.foodPrice}>${menuItem.price.toFixed(2)}</Text>
+            <Text style={styles.foodPrice}>${basePrice.toFixed(2)}</Text>
           </View>
 
           {/* Description */}
           <Text style={styles.description}>{menuItem.description}</Text>
 
           {/* Ingredients */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Ingredients</Text>
-            <View style={styles.ingredientsList}>
-              {menuItem.ingredients.map((ingredient) => (
-                <View key={ingredient} style={styles.ingredientChip}>
-                  <Text style={styles.ingredientChipText}>{ingredient}</Text>
-                </View>
-              ))}
+          {ingredients.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Ingredients</Text>
+              <View style={styles.ingredientsList}>
+                {ingredients.map((ingredient, index) => (
+                  <View key={index} style={styles.ingredientChip}>
+                    <Text style={styles.ingredientChipText}>{ingredient}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Portion Size */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Portion Size</Text>
             <View style={styles.sizeOptions}>
-              {menuItem.sizes.map((size) => {
+              {sizes.map((size) => {
                 const isSelected = selectedSize === size.name;
+                const sizePrice = typeof size.price === 'number' ? size.price : parseFloat(size.price || '0');
                 return (
                   <TouchableOpacity
                     key={size.name}
@@ -212,7 +253,7 @@ export default function FoodDetailScreen() {
                     <Text
                       style={[styles.sizePrice, isSelected && styles.sizePriceSelected]}
                     >
-                      ${size.price.toFixed(2)}
+                      ${sizePrice.toFixed(2)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -248,11 +289,7 @@ export default function FoodDetailScreen() {
                 activeOpacity={0.7}
                 disabled={quantity <= 1}
               >
-                <Ionicons
-                  name="remove"
-                  size={20}
-                  color={quantity <= 1 ? Colors.gray[300] : Colors.text.primary}
-                />
+                <Ionicons name="remove" size={20} color={Colors.text.primary} />
               </TouchableOpacity>
               <Text style={styles.quantityText}>{quantity}</Text>
               <TouchableOpacity
@@ -268,15 +305,16 @@ export default function FoodDetailScreen() {
       </ScrollView>
 
       {/* Add to Cart Button */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + Spacing.lg }]}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
         <TouchableOpacity
           style={styles.addToCartButton}
           onPress={handleAddToCart}
-          activeOpacity={0.85}
+          activeOpacity={0.9}
         >
-          <Ionicons name="cart-outline" size={22} color={Colors.white} />
-          <Text style={styles.addToCartText}>Add to Cart</Text>
-          <Text style={styles.addToCartPrice}>${totalPrice.toFixed(2)}</Text>
+          <View style={styles.buttonContent}>
+            <Text style={styles.buttonText}>Add to Cart</Text>
+            <Text style={styles.buttonPrice}>${totalPrice.toFixed(2)}</Text>
+          </View>
         </TouchableOpacity>
       </View>
     </View>
@@ -288,19 +326,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+  },
+  loadingText: {
+    marginTop: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text.secondary,
+  },
   scrollView: {
     flex: 1,
   },
-
-  // Image
   imageContainer: {
-    width: SCREEN_WIDTH,
     height: IMAGE_HEIGHT,
     position: 'relative',
   },
   foodImage: {
-    width: SCREEN_WIDTH,
-    height: IMAGE_HEIGHT,
+    width: '100%',
+    height: '100%',
   },
   dismissButton: {
     position: 'absolute',
@@ -308,10 +354,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.medium,
+    ...Shadows.small,
   },
   favoriteButton: {
     position: 'absolute',
@@ -319,16 +365,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.medium,
+    ...Shadows.small,
   },
-
-  // Content
   content: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xxl,
+    padding: Spacing.lg,
   },
   headerSection: {
     flexDirection: 'row',
@@ -337,12 +380,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   foodName: {
-    fontSize: FontSize.xxxl,
+    flex: 1,
+    fontSize: FontSize.xxl,
     fontWeight: '800',
     color: Colors.text.primary,
-    flex: 1,
     marginRight: Spacing.md,
-    letterSpacing: -0.5,
   },
   foodPrice: {
     fontSize: FontSize.xxl,
@@ -353,21 +395,17 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     lineHeight: 22,
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.lg,
   },
-
-  // Sections
   section: {
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.lg,
   },
   sectionTitle: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.text.primary,
     marginBottom: Spacing.md,
   },
-
-  // Ingredients
   ingredientsList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -376,16 +414,13 @@ const styles = StyleSheet.create({
   ingredientChip: {
     backgroundColor: Colors.gray[100],
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.full,
   },
   ingredientChipText: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
-    fontWeight: '500',
   },
-
-  // Size Selector
   sizeOptions: {
     flexDirection: 'row',
     gap: Spacing.md,
@@ -394,54 +429,47 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.lg,
+    padding: Spacing.md,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.border,
+    borderColor: 'transparent',
     ...Shadows.small,
   },
   sizeCardSelected: {
     borderColor: Colors.primary,
-    backgroundColor: Colors.primary,
   },
   sizeName: {
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '600',
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    color: Colors.text.secondary,
+    marginBottom: 4,
   },
   sizeNameSelected: {
-    color: Colors.white,
+    color: Colors.primary,
   },
   sizePrice: {
     fontSize: FontSize.md,
-    fontWeight: '500',
-    color: Colors.text.secondary,
+    fontWeight: '700',
+    color: Colors.text.primary,
   },
   sizePriceSelected: {
-    color: Colors.white,
+    color: Colors.primary,
   },
-
-  // Special Instructions
   instructionsInput: {
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     fontSize: FontSize.md,
     color: Colors.text.primary,
+    borderWidth: 1,
+    borderColor: Colors.border,
     minHeight: 80,
-    lineHeight: 22,
   },
-
-  // Quantity Selector
   quantitySelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: Spacing.xl,
+    justifyContent: 'center',
+    gap: Spacing.lg,
   },
   quantityButton: {
     width: 44,
@@ -450,65 +478,54 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
     ...Shadows.small,
   },
   quantityButtonDisabled: {
-    backgroundColor: Colors.gray[50],
-    borderColor: Colors.gray[200],
+    opacity: 0.5,
   },
   quantityText: {
     fontSize: FontSize.xxl,
     fontWeight: '700',
     color: Colors.text.primary,
-    minWidth: 32,
+    minWidth: 40,
     textAlign: 'center',
   },
-
-  // Bottom Bar
-  bottomBar: {
+  footer: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: Colors.white,
-    paddingTop: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.background,
+    padding: Spacing.lg,
+    borderTopWidth: 1,
     borderTopColor: Colors.border,
-    ...Shadows.large,
   },
   addToCartButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.lg,
-    gap: Spacing.sm,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
   },
-  addToCartText: {
-    fontSize: FontSize.xl,
+  buttonContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  buttonText: {
+    fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.white,
-    flex: 1,
-    textAlign: 'center',
   },
-  addToCartPrice: {
-    fontSize: FontSize.xl,
+  buttonPrice: {
+    fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.white,
-    marginRight: Spacing.lg,
   },
-
-  // Error State
   errorContainer: {
     flex: 1,
-    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xxl,
+    padding: Spacing.xl,
+    backgroundColor: Colors.background,
   },
   errorTitle: {
     fontSize: FontSize.xxl,
@@ -521,18 +538,17 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.xl,
   },
   errorButton: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.xxxl,
+    paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.lg,
   },
   errorButtonText: {
-    color: Colors.white,
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '700',
+    color: Colors.white,
   },
 });

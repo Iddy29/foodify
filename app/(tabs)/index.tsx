@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, type Href } from 'expo-router';
@@ -19,14 +20,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
-import {
-  categories,
-  getFeaturedRestaurants,
-  getPopularRestaurants,
-} from '@/data/mockData';
-import type { Restaurant, Category } from '@/data/mockData';
+import { useDataStore, Category, Restaurant } from '@/store/dataStore';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { useCartStore } from '@/store/cartStore';
+import { useAuthStore } from '@/store/authStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FEATURED_CARD_WIDTH = SCREEN_WIDTH * 0.78;
@@ -37,27 +34,63 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const featuredRestaurants = useMemo(() => getFeaturedRestaurants(), []);
-  const popularRestaurants = useMemo(() => getPopularRestaurants(), []);
+  // Real data from API
+  const {
+    categories,
+    featuredRestaurants,
+    popularRestaurants,
+    isLoadingCategories,
+    isLoadingRestaurants,
+    fetchCategories,
+    fetchFeaturedRestaurants,
+    fetchPopularRestaurants,
+  } = useDataStore();
 
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
   const itemCount = useCartStore((s) => s.getItemCount());
 
+  const user = useAuthStore((s) => s.user);
+
+  // Fetch data on mount
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    await Promise.all([
+      fetchCategories(),
+      fetchFeaturedRestaurants(),
+      fetchPopularRestaurants(),
+    ]);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
+
+  const handleAvatarPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/profile' as Href);
+  }, [router]);
+
   // Animated value for featured scroll for pagination dots
   const featuredScrollX = useRef(new Animated.Value(0)).current;
 
   const handleFavoriteToggle = useCallback(
-    (restaurantId: string) => {
+    (restaurantId: string | number) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      toggleFavorite({ type: 'restaurant', id: restaurantId });
+      toggleFavorite({ type: 'restaurant', id: restaurantId.toString() });
     },
     [toggleFavorite],
   );
 
   const handleRestaurantPress = useCallback(
-    (restaurantId: string) => {
+    (restaurantId: string | number) => {
       router.push(`/restaurant/${restaurantId}` as Href);
     },
     [router],
@@ -95,7 +128,7 @@ export default function HomeScreen() {
         activeOpacity={0.7}
       >
         <View style={styles.categoryIconContainer}>
-          <Text style={styles.categoryEmoji}>{item.icon}</Text>
+          <Text style={styles.categoryEmoji}>{item.icon || '🍽️'}</Text>
         </View>
         <Text style={styles.categoryName} numberOfLines={1}>
           {item.name}
@@ -107,7 +140,7 @@ export default function HomeScreen() {
 
   const renderFeaturedCard = useCallback(
     ({ item }: { item: Restaurant }) => {
-      const favorited = isFavorite('restaurant', item.id);
+      const favorited = isFavorite('restaurant', item.id.toString());
       return (
         <TouchableOpacity
           style={styles.featuredCard}
@@ -116,7 +149,7 @@ export default function HomeScreen() {
         >
           <View style={styles.featuredImageContainer}>
             <Image
-              source={{ uri: item.coverImage }}
+              source={{ uri: item.cover_image || item.image || 'https://via.placeholder.com/800x400' }}
               style={styles.featuredImage}
               resizeMode="cover"
             />
@@ -146,13 +179,13 @@ export default function HomeScreen() {
                   <Text style={styles.ratingPillText}>{item.rating}</Text>
                 </View>
                 <Text style={styles.featuredDelivery}>
-                  {item.deliveryTime}
+                  {item.delivery_time}
                 </Text>
                 <Text style={styles.featuredDot}>·</Text>
                 <Text style={styles.featuredDelivery}>
-                  {item.deliveryFee === 0
+                  {item.delivery_fee === 0
                     ? 'Free delivery'
-                    : `$${item.deliveryFee.toFixed(2)} delivery`}
+                    : `$${Number(item.delivery_fee).toFixed(2)} delivery`}
                 </Text>
               </View>
             </View>
@@ -165,7 +198,7 @@ export default function HomeScreen() {
 
   const renderPopularCard = useCallback(
     ({ item }: { item: Restaurant }) => {
-      const favorited = isFavorite('restaurant', item.id);
+      const favorited = isFavorite('restaurant', item.id.toString());
       return (
         <TouchableOpacity
           style={styles.popularCard}
@@ -174,7 +207,7 @@ export default function HomeScreen() {
         >
           <View style={styles.popularImageContainer}>
             <Image
-              source={{ uri: item.image }}
+              source={{ uri: item.image || 'https://via.placeholder.com/600x400' }}
               style={styles.popularImage}
               resizeMode="cover"
             />
@@ -192,7 +225,7 @@ export default function HomeScreen() {
             {/* Delivery time badge */}
             <View style={styles.deliveryBadge}>
               <Ionicons name="time-outline" size={10} color={Colors.white} />
-              <Text style={styles.deliveryBadgeText}>{item.deliveryTime}</Text>
+              <Text style={styles.deliveryBadgeText}>{item.delivery_time}</Text>
             </View>
           </View>
           <View style={styles.popularInfo}>
@@ -203,12 +236,12 @@ export default function HomeScreen() {
               <Ionicons name="star" size={12} color={Colors.star} />
               <Text style={styles.popularRating}>{item.rating}</Text>
               <View style={styles.metaDotSmall} />
-              <Text style={styles.popularDelivery}>{item.distance}</Text>
+              <Text style={styles.popularDelivery}>{item.distance || 'Nearby'}</Text>
             </View>
             <Text style={styles.popularPrice}>
-              {item.deliveryFee === 0
+              {item.delivery_fee === 0
                 ? 'Free delivery'
-                : `$${item.deliveryFee.toFixed(2)} delivery`}
+                : `$${Number(item.delivery_fee).toFixed(2)} delivery`}
             </Text>
           </View>
         </TouchableOpacity>
@@ -220,7 +253,9 @@ export default function HomeScreen() {
   const featuredKeyExtractor = useCallback((item: Restaurant) => `featured-${item.id}`, []);
   const categoryKeyExtractor = useCallback((item: Category) => `cat-${item.id}`, []);
 
-  if (!featuredRestaurants.length && !popularRestaurants.length) {
+  const isLoading = isLoadingCategories || isLoadingRestaurants;
+
+  if (isLoading && categories.length === 0 && featuredRestaurants.length === 0) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -234,6 +269,9 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         {/* Header with Gradient */}
         <LinearGradient
@@ -243,10 +281,22 @@ export default function HomeScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.appTitle}>Foodify</Text>
-              <Text style={styles.subtitle}>What would you like to eat?</Text>
+              <Text style={styles.subtitle}>
+                {user ? `Hi, ${user.name.split(' ')[0]}!` : 'What would you like to eat?'}
+              </Text>
             </View>
-            <TouchableOpacity style={styles.avatarContainer} activeOpacity={0.7}>
-              <Ionicons name="person" size={20} color={Colors.white} />
+            <TouchableOpacity
+              style={styles.avatarContainer}
+              onPress={handleAvatarPress}
+              activeOpacity={0.7}
+            >
+              {user ? (
+                <Text style={styles.avatarInitial}>
+                  {user.name.charAt(0).toUpperCase()}
+                </Text>
+              ) : (
+                <Ionicons name="person" size={20} color={Colors.white} />
+              )}
             </TouchableOpacity>
           </View>
 
@@ -291,58 +341,62 @@ export default function HomeScreen() {
         </View>
 
         {/* Featured Restaurants */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Featured</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
+        {featuredRestaurants.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Featured</Text>
+              <TouchableOpacity activeOpacity={0.7}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <Animated.FlatList
+              data={featuredRestaurants}
+              renderItem={renderFeaturedCard}
+              keyExtractor={featuredKeyExtractor}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.featuredList}
+              snapToInterval={FEATURED_SNAP_INTERVAL}
+              decelerationRate="fast"
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { x: featuredScrollX } } }],
+                { useNativeDriver: false, listener: onFeaturedScroll },
+              )}
+              scrollEventThrottle={16}
+            />
+            {/* Pagination Dots */}
+            <View style={styles.paginationDots}>
+              {featuredRestaurants.map((_, index) => (
+                <View
+                  key={`dot-${index}`}
+                  style={[
+                    styles.dot,
+                    activeFeaturedIndex === index && styles.dotActive,
+                  ]}
+                />
+              ))}
+            </View>
           </View>
-          <Animated.FlatList
-            data={featuredRestaurants}
-            renderItem={renderFeaturedCard}
-            keyExtractor={featuredKeyExtractor}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.featuredList}
-            snapToInterval={FEATURED_SNAP_INTERVAL}
-            decelerationRate="fast"
-            onScroll={Animated.event(
-              [{ nativeEvent: { contentOffset: { x: featuredScrollX } } }],
-              { useNativeDriver: false, listener: onFeaturedScroll },
-            )}
-            scrollEventThrottle={16}
-          />
-          {/* Pagination Dots */}
-          <View style={styles.paginationDots}>
-            {featuredRestaurants.map((_, index) => (
-              <View
-                key={`dot-${index}`}
-                style={[
-                  styles.dot,
-                  activeFeaturedIndex === index && styles.dotActive,
-                ]}
-              />
-            ))}
-          </View>
-        </View>
+        )}
 
         {/* Popular Near You */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Popular Near You</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
+        {popularRestaurants.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Popular Near You</Text>
+              <TouchableOpacity activeOpacity={0.7}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.popularGrid}>
+              {popularRestaurants.map((restaurant) => (
+                <View key={`popular-grid-${restaurant.id}`} style={styles.popularGridItem}>
+                  {renderPopularCard({ item: restaurant })}
+                </View>
+              ))}
+            </View>
           </View>
-          <View style={styles.popularGrid}>
-            {popularRestaurants.map((restaurant) => (
-              <View key={`popular-grid-${restaurant.id}`} style={styles.popularGridItem}>
-                {renderPopularCard({ item: restaurant })}
-              </View>
-            ))}
-          </View>
-        </View>
+        )}
 
         {/* Bottom spacing for tab bar */}
         <View style={{ height: Spacing.xxxl * 2 }} />
@@ -428,6 +482,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...Shadows.small,
+  },
+  avatarInitial: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.white,
   },
 
   // Search Bar
@@ -554,7 +613,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
     justifyContent: 'center',
     alignItems: 'center',
-    backdropFilter: 'blur(10px)',
   },
   featuredOverlay: {
     position: 'absolute',
