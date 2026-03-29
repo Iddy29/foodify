@@ -35,12 +35,10 @@ export interface Restaurant {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  menu_items_count?: number;
 }
 
 export interface MenuItem {
   id: number;
-  restaurant_id: number;
   name: string;
   description: string;
   price: number;
@@ -52,7 +50,6 @@ export interface MenuItem {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  restaurant?: { id: number; name: string };
 }
 
 export interface User {
@@ -70,7 +67,6 @@ export interface User {
 export interface Order {
   id: number;
   user_id: number;
-  restaurant_id: number;
   order_number: string;
   items: {
     menuItem: {
@@ -99,7 +95,6 @@ export interface Order {
   created_at: string;
   updated_at: string;
   user?: { id: number; name: string; email: string };
-  restaurant?: { id: number; name: string };
 }
 
 export interface OrderStats {
@@ -120,19 +115,24 @@ export interface DashboardStats {
   total_users: number;
   total_customers: number;
   total_admins: number;
-  total_restaurants: number;
   total_menu_items: number;
+  active_menu_items: number;
   total_categories: number;
-  active_restaurants: number;
-  featured_restaurants: number;
+  active_categories: number;
+  total_orders: number;
+  today_orders: number;
+  pending_orders: number;
+  total_revenue: number;
+  today_revenue: number;
   recent_users: User[];
-  recent_restaurants: Restaurant[];
+  recent_orders: Order[];
+  restaurant: Restaurant | null;
 }
 
 interface AdminState {
   // Data
   categories: Category[];
-  restaurants: Restaurant[];
+  restaurant: Restaurant | null;
   menuItems: MenuItem[];
   users: User[];
   orders: Order[];
@@ -142,7 +142,7 @@ interface AdminState {
   // Loading states
   isLoading: boolean;
   isLoadingCategories: boolean;
-  isLoadingRestaurants: boolean;
+  isLoadingRestaurant: boolean;
   isLoadingMenuItems: boolean;
   isLoadingUsers: boolean;
   isLoadingOrders: boolean;
@@ -158,16 +158,14 @@ interface AdminState {
   deleteCategory: (id: number) => Promise<void>;
   toggleCategory: (id: number) => Promise<void>;
   
-  // Actions - Restaurants
-  fetchRestaurants: () => Promise<void>;
+  // Actions - Restaurant (Single)
+  fetchRestaurant: () => Promise<void>;
   createRestaurant: (data: Partial<Restaurant>, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => Promise<void>;
-  updateRestaurant: (id: number, data: Partial<Restaurant>, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => Promise<void>;
-  deleteRestaurant: (id: number) => Promise<void>;
-  toggleRestaurant: (id: number) => Promise<void>;
-  toggleRestaurantFeatured: (id: number) => Promise<void>;
+  updateRestaurant: (data: Partial<Restaurant>, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => Promise<void>;
+  toggleRestaurant: () => Promise<void>;
   
   // Actions - Menu Items
-  fetchMenuItems: (restaurantId?: number) => Promise<void>;
+  fetchMenuItems: () => Promise<void>;
   createMenuItem: (data: Partial<MenuItem>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
   updateMenuItem: (id: number, data: Partial<MenuItem>, imageFile?: { uri: string; name: string; type: string }) => Promise<void>;
   deleteMenuItem: (id: number) => Promise<void>;
@@ -182,7 +180,7 @@ interface AdminState {
   toggleUser: (id: number) => Promise<void>;
 
   // Actions - Orders
-  fetchOrders: (filters?: { status?: string; user_id?: number; restaurant_id?: number; search?: string }) => Promise<void>;
+  fetchOrders: (filters?: { status?: string; user_id?: number; search?: string }) => Promise<void>;
   fetchOrderStats: () => Promise<void>;
   updateOrderStatus: (id: number, status: string, estimatedDelivery?: string) => Promise<void>;
   deleteOrder: (id: number) => Promise<void>;
@@ -275,7 +273,7 @@ async function apiRequestFormData<T>(
 export const useAdminStore = create<AdminState>((set, get) => ({
   // Initial state
   categories: [],
-  restaurants: [],
+  restaurant: null,
   menuItems: [],
   users: [],
   orders: [],
@@ -283,7 +281,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   dashboardStats: null,
   isLoading: false,
   isLoadingCategories: false,
-  isLoadingRestaurants: false,
+  isLoadingRestaurant: false,
   isLoadingMenuItems: false,
   isLoadingUsers: false,
   isLoadingOrders: false,
@@ -319,7 +317,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  createCategory: async (data, imageFile?: { uri: string; name: string; type: string }) => {
+  createCategory: async (data, imageFile) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFile) {
@@ -344,7 +342,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateCategory: async (id, data, imageFile?: { uri: string; name: string; type: string }) => {
+  updateCategory: async (id, data, imageFile) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFile) {
@@ -354,7 +352,6 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         formData.append('sort_order', String(data.sort_order ?? 0));
         formData.append('is_active', String(data.is_active ?? true));
         formData.append('image', imageFile as unknown as Blob);
-        // Use POST with _method=PUT for Laravel to handle file uploads on PUT
         formData.append('_method', 'PUT');
         await apiRequestFormData(`/api/admin/categories/${id}`, 'POST', formData);
       } else {
@@ -396,21 +393,21 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  // ─── Restaurants ───────────────────────────────────────────────────────────
-  fetchRestaurants: async () => {
-    set({ isLoadingRestaurants: true, error: null });
+  // ─── Restaurant (Single) ───────────────────────────────────────────────────
+  fetchRestaurant: async () => {
+    set({ isLoadingRestaurant: true, error: null });
     try {
-      const response = await apiRequest<{ data: Restaurant[] }>('/api/admin/restaurants');
-      set({ restaurants: response.data || response as unknown as Restaurant[], isLoadingRestaurants: false });
+      const restaurant = await apiRequest<Restaurant>('/api/admin/restaurant');
+      set({ restaurant, isLoadingRestaurant: false });
     } catch (err) {
       set({
-        error: err instanceof Error ? err.message : 'Failed to fetch restaurants.',
-        isLoadingRestaurants: false,
+        error: err instanceof Error ? err.message : 'Failed to fetch restaurant.',
+        isLoadingRestaurant: false,
       });
     }
   },
 
-  createRestaurant: async (data, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => {
+  createRestaurant: async (data, imageFiles) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFiles && (imageFiles.image || imageFiles.cover_image)) {
@@ -430,11 +427,11 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         if (imageFiles.cover_image) {
           formData.append('cover_image', imageFiles.cover_image as unknown as Blob);
         }
-        await apiRequestFormData('/api/admin/restaurants', 'POST', formData);
+        await apiRequestFormData('/api/admin/restaurant', 'POST', formData);
       } else {
-        await apiRequest('/api/admin/restaurants', 'POST', data);
+        await apiRequest('/api/admin/restaurant', 'POST', data);
       }
-      await get().fetchRestaurants();
+      await get().fetchRestaurant();
       set({ isLoading: false });
     } catch (err) {
       set({
@@ -445,7 +442,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateRestaurant: async (id, data, imageFiles?: { image?: { uri: string; name: string; type: string }; cover_image?: { uri: string; name: string; type: string } }) => {
+  updateRestaurant: async (data, imageFiles) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFiles && (imageFiles.image || imageFiles.cover_image)) {
@@ -466,11 +463,11 @@ export const useAdminStore = create<AdminState>((set, get) => ({
           formData.append('cover_image', imageFiles.cover_image as unknown as Blob);
         }
         formData.append('_method', 'PUT');
-        await apiRequestFormData(`/api/admin/restaurants/${id}`, 'POST', formData);
+        await apiRequestFormData('/api/admin/restaurant', 'POST', formData);
       } else {
-        await apiRequest(`/api/admin/restaurants/${id}`, 'PUT', data);
+        await apiRequest('/api/admin/restaurant', 'PUT', data);
       }
-      await get().fetchRestaurants();
+      await get().fetchRestaurant();
       set({ isLoading: false });
     } catch (err) {
       set({
@@ -481,49 +478,21 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  deleteRestaurant: async (id) => {
-    set({ isLoading: true, error: null });
+  toggleRestaurant: async () => {
     try {
-      await apiRequest(`/api/admin/restaurants/${id}`, 'DELETE');
-      await get().fetchRestaurants();
-      set({ isLoading: false });
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Failed to delete restaurant.',
-        isLoading: false,
-      });
-      throw err;
-    }
-  },
-
-  toggleRestaurant: async (id) => {
-    try {
-      await apiRequest(`/api/admin/restaurants/${id}/toggle`, 'PATCH');
-      await get().fetchRestaurants();
+      await apiRequest('/api/admin/restaurant/toggle', 'PATCH');
+      await get().fetchRestaurant();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to toggle restaurant.' });
       throw err;
     }
   },
 
-  toggleRestaurantFeatured: async (id) => {
-    try {
-      await apiRequest(`/api/admin/restaurants/${id}/toggle-featured`, 'PATCH');
-      await get().fetchRestaurants();
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to toggle featured status.' });
-      throw err;
-    }
-  },
-
   // ─── Menu Items ────────────────────────────────────────────────────────────
-  fetchMenuItems: async (restaurantId) => {
+  fetchMenuItems: async () => {
     set({ isLoadingMenuItems: true, error: null });
     try {
-      const url = restaurantId 
-        ? `/api/admin/restaurants/${restaurantId}/menu-items`
-        : '/api/admin/menu-items';
-      const response = await apiRequest<{ data: MenuItem[] }>(url);
+      const response = await apiRequest<{ data: MenuItem[] }>('/api/admin/menu-items');
       set({ menuItems: response.data || response as unknown as MenuItem[], isLoadingMenuItems: false });
     } catch (err) {
       set({
@@ -533,7 +502,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  createMenuItem: async (data, imageFile?: { uri: string; name: string; type: string }) => {
+  createMenuItem: async (data, imageFile) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFile) {
@@ -563,7 +532,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  updateMenuItem: async (id, data, imageFile?: { uri: string; name: string; type: string }) => {
+  updateMenuItem: async (id, data, imageFile) => {
     set({ isLoading: true, error: null });
     try {
       if (imageFile) {
@@ -705,7 +674,6 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       const params = new URLSearchParams();
       if (filters.status) params.append('status', filters.status);
       if (filters.user_id) params.append('user_id', filters.user_id.toString());
-      if (filters.restaurant_id) params.append('restaurant_id', filters.restaurant_id.toString());
       if (filters.search) params.append('search', filters.search);
 
       const query = params.toString() ? `?${params.toString()}` : '';

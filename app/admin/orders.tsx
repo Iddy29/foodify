@@ -100,16 +100,20 @@ export default function OrdersManagement() {
   };
 
   const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      order.order_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.user?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.user?.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter ? order.status === statusFilter : true;
-    return matchesSearch && matchesStatus;
+    if (statusFilter && order.status !== statusFilter) return false;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return (
+        order.order_number.toLowerCase().includes(query) ||
+        order.user?.name?.toLowerCase().includes(query) ||
+        order.user?.email?.toLowerCase().includes(query)
+      );
+    }
+    return true;
   });
 
   const renderStatCard = (title: string, value: number | string, color: string) => (
-    <View style={[styles.statCard, { borderLeftColor: color, borderLeftWidth: 4 }]}>
+    <View style={[styles.statCard, { borderLeftColor: color }]}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statTitle}>{title}</Text>
     </View>
@@ -120,58 +124,155 @@ export default function OrdersManagement() {
       <View style={styles.orderHeader}>
         <View>
           <Text style={styles.orderNumber}>{item.order_number}</Text>
-          <Text style={styles.orderDate}>
-            {new Date(item.created_at).toLocaleDateString()}
-          </Text>
+          <Text style={styles.orderCustomer}>{item.user?.name || 'Unknown'}</Text>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: STATUS_COLORS[item.status]?.bg || Colors.gray[100] },
-          ]}
-        >
-          <Text
-            style={[
-              styles.statusText,
-              { color: STATUS_COLORS[item.status]?.text || Colors.text.secondary },
-            ]}
-          >
-            {STATUS_LABELS[item.status] || item.status}
+        <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[item.status].bg }]}>
+          <Text style={[styles.statusText, { color: STATUS_COLORS[item.status].text }]}>
+            {STATUS_LABELS[item.status]}
           </Text>
         </View>
       </View>
-
-      <View style={styles.orderInfo}>
-        <View style={styles.infoRow}>
-          <Ionicons name="person-outline" size={16} color={Colors.text.secondary} />
-          <Text style={styles.infoText}>{item.user?.name || 'Unknown'}</Text>
-        </View>
-        <View style={styles.infoRow}>
-          <Ionicons name="restaurant-outline" size={16} color={Colors.text.secondary} />
-          <Text style={styles.infoText}>{item.restaurant?.name || 'Unknown'}</Text>
-        </View>
-        <View style={styles.infoRow}>
-          <Ionicons name="cash-outline" size={16} color={Colors.text.secondary} />
-          <Text style={styles.infoText}>${Number(item.total).toFixed(2)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.orderActions}>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.viewBtn]}
-          onPress={() => handleViewOrder(item)}
-        >
-          <Ionicons name="eye-outline" size={18} color={Colors.primary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.deleteBtn]}
-          onPress={() => handleDelete(item)}
-        >
-          <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-        </TouchableOpacity>
+      <View style={styles.orderFooter}>
+        <Text style={styles.orderDate}>{new Date(item.created_at).toLocaleDateString()}</Text>
+        <Text style={styles.orderTotal}>${parseFloat(String(item.total)).toFixed(2)}</Text>
       </View>
     </TouchableOpacity>
   );
+
+  const renderOrderDetail = () => {
+    if (!selectedOrder) return null;
+
+    return (
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={styles.detailHeader}>
+          <Text style={styles.detailTitle}>Order Details</Text>
+          <TouchableOpacity onPress={() => setModalVisible(false)}>
+            <Ionicons name="close" size={24} color={Colors.text.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Order Info */}
+        <View style={styles.detailSection}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Order Number</Text>
+            <Text style={styles.detailValue}>{selectedOrder.order_number}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Date</Text>
+            <Text style={styles.detailValue}>
+              {new Date(selectedOrder.created_at).toLocaleString()}
+            </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Status</Text>
+            <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[selectedOrder.status].bg }]}>
+              <Text style={[styles.statusText, { color: STATUS_COLORS[selectedOrder.status].text }]}>
+                {STATUS_LABELS[selectedOrder.status]}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Customer Info */}
+        <View style={styles.detailSection}>
+          <Text style={styles.sectionTitle}>Customer</Text>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Name</Text>
+            <Text style={styles.detailValue}>{selectedOrder.user?.name || 'N/A'}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Email</Text>
+            <Text style={styles.detailValue}>{selectedOrder.user?.email || 'N/A'}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Delivery Address</Text>
+            <Text style={styles.detailValue}>{selectedOrder.delivery_address}</Text>
+          </View>
+        </View>
+
+        {/* Order Items */}
+        <View style={styles.detailSection}>
+          <Text style={styles.sectionTitle}>Items</Text>
+          {selectedOrder.items?.map((item, index) => (
+            <View key={index} style={styles.itemRow}>
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{item.menuItem.name}</Text>
+                <Text style={styles.itemDetails}>
+                  {item.quantity}x • {item.selectedSize.name}
+                </Text>
+                {item.specialInstructions && (
+                  <Text style={styles.itemNote}>Note: {item.specialInstructions}</Text>
+                )}
+              </View>
+              <Text style={styles.itemPrice}>
+                ${(item.selectedSize.price * item.quantity).toFixed(2)}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Order Summary */}
+        <View style={styles.detailSection}>
+          <Text style={styles.sectionTitle}>Summary</Text>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Subtotal</Text>
+            <Text style={styles.detailValue}>${parseFloat(String(selectedOrder.subtotal)).toFixed(2)}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Delivery Fee</Text>
+            <Text style={styles.detailValue}>${parseFloat(String(selectedOrder.delivery_fee)).toFixed(2)}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Tax</Text>
+            <Text style={styles.detailValue}>${parseFloat(String(selectedOrder.tax)).toFixed(2)}</Text>
+          </View>
+          <View style={[styles.detailRow, styles.totalRow]}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>${parseFloat(String(selectedOrder.total)).toFixed(2)}</Text>
+          </View>
+        </View>
+
+        {/* Status Update */}
+        <View style={styles.detailSection}>
+          <Text style={styles.sectionTitle}>Update Status</Text>
+          <View style={styles.statusButtons}>
+            {Object.entries(STATUS_LABELS).map(([status, label]) => (
+              <TouchableOpacity
+                key={status}
+                style={[
+                  styles.statusButton,
+                  selectedOrder.status === status && styles.statusButtonActive,
+                  { backgroundColor: STATUS_COLORS[status].bg },
+                ]}
+                onPress={() => handleUpdateStatus(selectedOrder.id, status)}
+              >
+                <Text
+                  style={[
+                    styles.statusButtonText,
+                    { color: STATUS_COLORS[status].text },
+                  ]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Delete Button */}
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => {
+            setModalVisible(false);
+            handleDelete(selectedOrder);
+          }}
+        >
+          <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+          <Text style={styles.deleteButtonText}>Delete Order</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
 
   if (isLoadingOrders && orders.length === 0) {
     return (
@@ -191,33 +292,32 @@ export default function OrdersManagement() {
           <Text style={styles.subtitle}>{orders.length} total orders</Text>
         </View>
         <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
-          <Ionicons name="refresh" size={24} color={Colors.white} />
+          <Ionicons name="refresh" size={20} color={Colors.white} />
         </TouchableOpacity>
       </View>
 
-      {/* Stats Grid */}
+      {/* Stats */}
       {orderStats && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.statsContainer}
         >
+          {renderStatCard('Total', orderStats.total_orders, Colors.primary)}
           {renderStatCard('Today', orderStats.today_orders, '#10B981')}
           {renderStatCard('Pending', orderStats.pending_orders, '#F59E0B')}
-          {renderStatCard('Preparing', orderStats.preparing_orders, '#6366F1')}
-          {renderStatCard('Delivered', orderStats.delivered_orders, '#10B981')}
-          {renderStatCard('Revenue', `$${Number(orderStats.today_revenue).toFixed(0)}`, '#EC4899')}
+          {renderStatCard('Revenue', `$${parseFloat(String(orderStats.total_revenue)).toFixed(0)}`, '#8B5CF6')}
         </ScrollView>
       )}
 
       {/* Search */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={Colors.text.light} style={styles.searchIcon} />
+        <Ionicons name="search" size={20} color={Colors.text.light} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search orders..."
           value={searchQuery}
           onChangeText={setSearchQuery}
+          placeholder="Search orders..."
           placeholderTextColor={Colors.text.light}
         />
         {searchQuery.length > 0 && (
@@ -227,7 +327,7 @@ export default function OrdersManagement() {
         )}
       </View>
 
-      {/* Status Filters */}
+      {/* Status Filter */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -241,13 +341,13 @@ export default function OrdersManagement() {
             All
           </Text>
         </TouchableOpacity>
-        {Object.entries(STATUS_LABELS).map(([key, label]) => (
+        {Object.entries(STATUS_LABELS).map(([status, label]) => (
           <TouchableOpacity
-            key={key}
-            style={[styles.filterChip, statusFilter === key && styles.filterChipActive]}
-            onPress={() => setStatusFilter(key)}
+            key={status}
+            style={[styles.filterChip, statusFilter === status && styles.filterChipActive]}
+            onPress={() => setStatusFilter(status)}
           >
-            <Text style={[styles.filterText, statusFilter === key && styles.filterTextActive]}>
+            <Text style={[styles.filterText, statusFilter === status && styles.filterTextActive]}>
               {label}
             </Text>
           </TouchableOpacity>
@@ -270,123 +370,18 @@ export default function OrdersManagement() {
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="receipt-outline" size={64} color={Colors.gray[300]} />
-            <Text style={styles.emptyText}>No orders found</Text>
-          </View>
-        }
       />
 
       {/* Order Detail Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent={true}>
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {selectedOrder && (
-              <>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Order Details</Text>
-                  <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Ionicons name="close" size={24} color={Colors.text.primary} />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView showsVerticalScrollIndicator={false}>
-                  <Text style={styles.detailOrderNumber}>{selectedOrder.order_number}</Text>
-
-                  <View
-                    style={[
-                      styles.detailStatusBadge,
-                      { backgroundColor: STATUS_COLORS[selectedOrder.status]?.bg || Colors.gray[100] },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.detailStatusText,
-                        { color: STATUS_COLORS[selectedOrder.status]?.text || Colors.text.secondary },
-                      ]}
-                    >
-                      {STATUS_LABELS[selectedOrder.status] || selectedOrder.status}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Customer</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.user?.name}</Text>
-                    <Text style={styles.detailSubtext}>{selectedOrder.user?.email}</Text>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Restaurant</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.restaurant?.name}</Text>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Delivery Address</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.delivery_address}</Text>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Items</Text>
-                    {selectedOrder.items?.map((item, index) => (
-                      <View key={index} style={styles.itemRow}>
-                        <Text style={styles.itemQuantity}>{item.quantity}x</Text>
-                        <Text style={styles.itemName}>{item.menuItem?.name}</Text>
-                        <Text style={styles.itemPrice}>
-                          ${(item.quantity * (item.selectedSize?.price || item.menuItem?.price || 0)).toFixed(2)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <View style={styles.totalRow}>
-                      <Text style={styles.totalLabel}>Subtotal</Text>
-                      <Text style={styles.totalValue}>${Number(selectedOrder.subtotal).toFixed(2)}</Text>
-                    </View>
-                    <View style={styles.totalRow}>
-                      <Text style={styles.totalLabel}>Delivery Fee</Text>
-                      <Text style={styles.totalValue}>${Number(selectedOrder.delivery_fee).toFixed(2)}</Text>
-                    </View>
-                    <View style={styles.totalRow}>
-                      <Text style={styles.totalLabel}>Tax</Text>
-                      <Text style={styles.totalValue}>${Number(selectedOrder.tax).toFixed(2)}</Text>
-                    </View>
-                    <View style={[styles.totalRow, styles.grandTotal]}>
-                      <Text style={styles.grandTotalLabel}>Total</Text>
-                      <Text style={styles.grandTotalValue}>${Number(selectedOrder.total).toFixed(2)}</Text>
-                    </View>
-                  </View>
-
-                  {/* Status Update Buttons */}
-                  <View style={styles.statusButtonsContainer}>
-                    <Text style={styles.detailLabel}>Update Status</Text>
-                    <View style={styles.statusButtons}>
-                      {Object.entries(STATUS_LABELS).map(([key, label]) => (
-                        <TouchableOpacity
-                          key={key}
-                          style={[
-                            styles.statusButton,
-                            selectedOrder.status === key && styles.statusButtonActive,
-                          ]}
-                          onPress={() => handleUpdateStatus(selectedOrder.id, key)}
-                          disabled={isLoading}
-                        >
-                          <Text
-                            style={[
-                              styles.statusButtonText,
-                              selectedOrder.status === key && styles.statusButtonTextActive,
-                            ]}
-                          >
-                            {label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                </ScrollView>
-              </>
-            )}
+            {renderOrderDetail()}
           </View>
         </View>
       </Modal>
@@ -428,13 +423,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   refreshButton: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.medium,
   },
   statsContainer: {
     paddingHorizontal: Spacing.lg,
@@ -443,9 +437,10 @@ const styles = StyleSheet.create({
   },
   statCard: {
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
     padding: Spacing.md,
-    minWidth: 100,
+    borderRadius: BorderRadius.lg,
+    minWidth: 80,
+    borderLeftWidth: 4,
     ...Shadows.small,
   },
   statValue: {
@@ -468,12 +463,9 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     ...Shadows.small,
   },
-  searchIcon: {
-    marginRight: Spacing.sm,
-  },
   searchInput: {
     flex: 1,
-    paddingVertical: Spacing.md,
+    padding: Spacing.md,
     fontSize: FontSize.md,
     color: Colors.text.primary,
   },
@@ -522,8 +514,8 @@ const styles = StyleSheet.create({
   },
   orderCard: {
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
     padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
     marginBottom: Spacing.md,
     ...Shadows.small,
   },
@@ -538,7 +530,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.text.primary,
   },
-  orderDate: {
+  orderCustomer: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
     marginTop: 2,
@@ -552,45 +544,19 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '700',
   },
-  orderInfo: {
-    marginBottom: Spacing.sm,
-  },
-  infoRow: {
+  orderFooter: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: Spacing.xs,
-    marginBottom: 4,
   },
-  infoText: {
+  orderDate: {
     fontSize: FontSize.sm,
-    color: Colors.text.secondary,
+    color: Colors.text.light,
   },
-  orderActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: Spacing.sm,
-  },
-  actionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  viewBtn: {
-    backgroundColor: Colors.primaryLight + '20',
-  },
-  deleteBtn: {
-    backgroundColor: '#EF444420',
-  },
-  emptyState: {
-    padding: Spacing.xxl,
-    alignItems: 'center',
-  },
-  emptyText: {
+  orderTotal: {
     fontSize: FontSize.md,
-    color: Colors.text.secondary,
-    marginTop: Spacing.md,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   modalOverlay: {
     flex: 1,
@@ -604,135 +570,123 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
     maxHeight: '90%',
   },
-  modalHeader: {
+  detailHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.xl,
   },
-  modalTitle: {
+  detailTitle: {
     fontSize: FontSize.xxl,
     fontWeight: '800',
     color: Colors.text.primary,
   },
-  detailOrderNumber: {
-    fontSize: FontSize.xl,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    textAlign: 'center',
+  detailSection: {
+    marginBottom: Spacing.xl,
+    paddingBottom: Spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray[200],
   },
-  detailStatusBadge: {
-    alignSelf: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    marginTop: Spacing.md,
-  },
-  detailStatusText: {
+  sectionTitle: {
     fontSize: FontSize.md,
     fontWeight: '700',
+    color: Colors.text.primary,
+    marginBottom: Spacing.md,
   },
-  detailSection: {
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray[100],
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
   },
   detailLabel: {
     fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.light,
-    marginBottom: Spacing.xs,
+    color: Colors.text.secondary,
   },
   detailValue: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.text.primary,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray[100],
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemName: {
     fontSize: FontSize.md,
     fontWeight: '600',
     color: Colors.text.primary,
   },
-  detailSubtext: {
+  itemDetails: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
     marginTop: 2,
   },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.xs,
+  itemNote: {
+    fontSize: FontSize.xs,
+    color: Colors.text.light,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
-  itemQuantity: {
-    width: 30,
-    fontSize: FontSize.sm,
+  itemPrice: {
+    fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.primary,
   },
-  itemName: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    color: Colors.text.primary,
-  },
-  itemPrice: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.primary,
-  },
   totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  totalLabel: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-  },
-  totalValue: {
-    fontSize: FontSize.sm,
-    color: Colors.text.primary,
-  },
-  grandTotal: {
     marginTop: Spacing.sm,
     paddingTop: Spacing.sm,
     borderTopWidth: 1,
     borderTopColor: Colors.gray[200],
   },
-  grandTotalLabel: {
+  totalLabel: {
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.text.primary,
   },
-  grandTotalValue: {
+  totalValue: {
     fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.primary,
-  },
-  statusButtonsContainer: {
-    marginTop: Spacing.xl,
-    paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray[200],
   },
   statusButtons: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
-    marginTop: Spacing.sm,
   },
   statusButton: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray[100],
-    borderWidth: 1,
-    borderColor: 'transparent',
+    borderRadius: BorderRadius.md,
   },
   statusButtonActive: {
-    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.text.primary,
   },
   statusButtonText: {
     fontSize: FontSize.sm,
     fontWeight: '600',
-    color: Colors.text.secondary,
   },
-  statusButtonTextActive: {
-    color: Colors.white,
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: '#FEE2E2',
+    marginTop: Spacing.md,
+  },
+  deleteButtonText: {
+    color: Colors.danger,
+    fontSize: FontSize.md,
+    fontWeight: '600',
   },
 });

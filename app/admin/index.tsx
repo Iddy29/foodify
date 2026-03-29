@@ -16,7 +16,7 @@ import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/th
 
 interface StatCardProps {
   title: string;
-  value: number;
+  value: number | string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   onPress?: () => void;
@@ -33,7 +33,9 @@ function StatCard({ title, value, icon, color, onPress }: StatCardProps) {
         <Ionicons name={icon} size={24} color={color} />
       </View>
       <View style={styles.statContent}>
-        <Text style={styles.statValue}>{value.toLocaleString()}</Text>
+        <Text style={styles.statValue}>
+          {typeof value === 'number' ? value.toLocaleString() : value}
+        </Text>
         <Text style={styles.statTitle}>{title}</Text>
       </View>
     </TouchableOpacity>
@@ -81,8 +83,8 @@ export default function AdminDashboard() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Dashboard Overview</Text>
-        <Text style={styles.subtitle}>Manage your Foodify platform</Text>
+        <Text style={styles.title}>Dashboard</Text>
+        <Text style={styles.subtitle}>Manage your restaurant</Text>
       </View>
 
       {error && (
@@ -98,140 +100,152 @@ export default function AdminDashboard() {
       {/* Stats Grid */}
       <View style={styles.statsGrid}>
         <StatCard
-          title="Total Users"
-          value={dashboardStats?.total_users || 0}
-          icon="people"
-          color="#6366F1"
-          onPress={() => router.push('/admin/users')}
+          title="Total Orders"
+          value={dashboardStats?.total_orders ?? 0}
+          icon="receipt-outline"
+          color={Colors.primary}
+          onPress={() => router.push('/admin/orders')}
         />
         <StatCard
-          title="Restaurants"
-          value={dashboardStats?.total_restaurants || 0}
-          icon="restaurant"
+          title="Today's Orders"
+          value={dashboardStats?.today_orders ?? 0}
+          icon="today-outline"
           color="#10B981"
-          onPress={() => router.push('/admin/restaurants')}
+        />
+        <StatCard
+          title="Pending Orders"
+          value={dashboardStats?.pending_orders ?? 0}
+          icon="time-outline"
+          color="#F59E0B"
+          onPress={() => router.push('/admin/orders')}
         />
         <StatCard
           title="Menu Items"
-          value={dashboardStats?.total_menu_items || 0}
-          icon="fast-food"
-          color="#F59E0B"
+          value={dashboardStats?.total_menu_items ?? 0}
+          icon="fast-food-outline"
+          color="#8B5CF6"
           onPress={() => router.push('/admin/products')}
         />
-        <StatCard
-          title="Categories"
-          value={dashboardStats?.total_categories || 0}
-          icon="folder"
-          color="#EC4899"
-          onPress={() => router.push('/admin/categories')}
-        />
+      </View>
+
+      {/* Revenue Section */}
+      <View style={styles.revenueSection}>
+        <Text style={styles.sectionTitle}>Revenue</Text>
+        <View style={styles.revenueGrid}>
+          <View style={styles.revenueCard}>
+            <Text style={styles.revenueLabel}>Total Revenue</Text>
+            <Text style={styles.revenueValue}>
+              ${parseFloat(String(dashboardStats?.total_revenue ?? 0)).toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.revenueCard}>
+            <Text style={styles.revenueLabel}>Today's Revenue</Text>
+            <Text style={styles.revenueValue}>
+              ${parseFloat(String(dashboardStats?.today_revenue ?? 0)).toFixed(2)}
+            </Text>
+          </View>
+        </View>
       </View>
 
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsGrid}>
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/admin/categories')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#EC489920' }]}>
-              <Ionicons name="add-circle" size={28} color="#EC4899" />
-            </View>
-            <Text style={styles.actionText}>Add Category</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/admin/restaurants')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#10B98120' }]}>
-              <Ionicons name="business" size={28} color="#10B981" />
-            </View>
-            <Text style={styles.actionText}>Add Restaurant</Text>
-          </TouchableOpacity>
-          
+        <View style={styles.quickActions}>
           <TouchableOpacity
             style={styles.actionCard}
             onPress={() => router.push('/admin/products')}
-            activeOpacity={0.7}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#F59E0B20' }]}>
-              <Ionicons name="pizza" size={28} color="#F59E0B" />
+            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="add-circle" size={24} color="#D97706" />
             </View>
             <Text style={styles.actionText}>Add Product</Text>
           </TouchableOpacity>
-          
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => router.push('/admin/users')}
-            activeOpacity={0.7}
+            onPress={() => router.push('/admin/categories')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#6366F120' }]}>
-              <Ionicons name="person-add" size={28} color="#6366F1" />
+            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Ionicons name="pricetags" size={24} color="#2563EB" />
             </View>
-            <Text style={styles.actionText}>Add User</Text>
+            <Text style={styles.actionText}>Categories</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push('/admin/restaurants')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+              <Ionicons name="restaurant" size={24} color="#9333EA" />
+            </View>
+            <Text style={styles.actionText}>Settings</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push('/admin/orders')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#D1FAE5' }]}>
+              <Ionicons name="list" size={24} color="#059669" />
+            </View>
+            <Text style={styles.actionText}>View Orders</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Recent Users */}
-      {dashboardStats?.recent_users && dashboardStats.recent_users.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Users</Text>
-            <TouchableOpacity onPress={() => router.push('/admin/users')}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          {dashboardStats.recent_users.map((user) => (
-            <View key={user.id} style={styles.listItem}>
-              <View style={styles.userAvatar}>
-                <Text style={styles.userInitial}>{user.name.charAt(0).toUpperCase()}</Text>
-              </View>
-              <View style={styles.listContent}>
-                <Text style={styles.listTitle}>{user.name}</Text>
-                <Text style={styles.listSubtitle}>{user.email}</Text>
-              </View>
-              <View style={[styles.badge, user.role === 'admin' ? styles.adminBadge : styles.customerBadge]}>
-                <Text style={[styles.badgeText, user.role === 'admin' ? styles.adminBadgeText : styles.customerBadgeText]}>
-                  {user.role}
-                </Text>
-              </View>
-            </View>
-          ))}
+      {/* Recent Orders */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Orders</Text>
+          <TouchableOpacity onPress={() => router.push('/admin/orders')}>
+            <Text style={styles.seeAllText}>See All</Text>
+          </TouchableOpacity>
         </View>
-      )}
-
-      {/* Recent Restaurants */}
-      {dashboardStats?.recent_restaurants && dashboardStats.recent_restaurants.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Restaurants</Text>
-            <TouchableOpacity onPress={() => router.push('/admin/restaurants')}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
+        {dashboardStats?.recent_orders?.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="receipt-outline" size={48} color={Colors.text.light} />
+            <Text style={styles.emptyText}>No orders yet</Text>
           </View>
-          {dashboardStats.recent_restaurants.map((restaurant) => (
-            <View key={restaurant.id} style={styles.listItem}>
-              <View style={styles.restaurantIcon}>
-                <Ionicons name="restaurant" size={20} color={Colors.primary} />
+        ) : (
+          dashboardStats?.recent_orders?.slice(0, 5).map((order) => (
+            <TouchableOpacity
+              key={order.id}
+              style={styles.orderCard}
+              onPress={() => router.push('/admin/orders')}
+            >
+              <View style={styles.orderInfo}>
+                <Text style={styles.orderNumber}>{order.order_number}</Text>
+                <Text style={styles.orderCustomer}>{order.user?.name || 'Unknown'}</Text>
               </View>
-              <View style={styles.listContent}>
-                <Text style={styles.listTitle}>{restaurant.name}</Text>
-                <Text style={styles.listSubtitle}>Rating: {restaurant.rating} ★</Text>
-              </View>
-              <View style={[styles.statusBadge, restaurant.is_active ? styles.activeBadge : styles.inactiveBadge]}>
-                <Text style={[styles.statusText, restaurant.is_active ? styles.activeText : styles.inactiveText]}>
-                  {restaurant.is_active ? 'Active' : 'Inactive'}
+              <View style={styles.orderMeta}>
+                <Text style={styles.orderAmount}>
+                  ${parseFloat(String(order.total)).toFixed(2)}
                 </Text>
+                <View style={[
+                  styles.statusBadge,
+                  { backgroundColor: 
+                    order.status === 'pending' ? '#FEF3C7' :
+                    order.status === 'confirmed' ? '#DBEAFE' :
+                    order.status === 'preparing' ? '#E0E7FF' :
+                    order.status === 'on_the_way' ? '#F3E8FF' :
+                    order.status === 'delivered' ? '#D1FAE5' : '#FEE2E2'
+                  }
+                ]}>
+                  <Text style={[
+                    styles.statusText,
+                    { color: 
+                      order.status === 'pending' ? '#D97706' :
+                      order.status === 'confirmed' ? '#2563EB' :
+                      order.status === 'preparing' ? '#4F46E5' :
+                      order.status === 'on_the_way' ? '#9333EA' :
+                      order.status === 'delivered' ? '#059669' : '#DC2626'
+                    }
+                  ]}>
+                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                  </Text>
+                </View>
               </View>
-            </View>
-          ))}
-        </View>
-      )}
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -285,22 +299,24 @@ const styles = StyleSheet.create({
   retryText: {
     color: Colors.white,
     fontWeight: '700',
-    fontSize: FontSize.sm,
+    textDecorationLine: 'underline',
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.md,
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.xl,
   },
   statCard: {
-    width: '47%',
+    flex: 1,
+    minWidth: '45%',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    ...Shadows.medium,
+    gap: Spacing.md,
+    ...Shadows.small,
   },
   statIconContainer: {
     width: 48,
@@ -309,7 +325,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gray[100],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: Spacing.md,
   },
   statContent: {
     flex: 1,
@@ -324,8 +339,38 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginTop: 2,
   },
+  revenueSection: {
+    marginBottom: Spacing.xl,
+  },
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginBottom: Spacing.md,
+  },
+  revenueGrid: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  revenueCard: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Shadows.small,
+  },
+  revenueLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.xs,
+  },
+  revenueValue: {
+    fontSize: FontSize.xxl,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
   section: {
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -333,44 +378,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  sectionTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-  seeAll: {
-    fontSize: FontSize.md,
+  seeAllText: {
+    fontSize: FontSize.sm,
     color: Colors.primary,
     fontWeight: '600',
   },
-  actionsGrid: {
+  quickActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.md,
   },
   actionCard: {
-    width: '47%',
+    flex: 1,
+    minWidth: '45%',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
     alignItems: 'center',
+    gap: Spacing.sm,
     ...Shadows.small,
   },
   actionIcon: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: BorderRadius.lg,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
   },
   actionText: {
     fontSize: FontSize.sm,
     fontWeight: '600',
     color: Colors.text.primary,
   },
-  listItem: {
+  emptyState: {
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  emptyText: {
+    fontSize: FontSize.md,
+    color: Colors.text.light,
+    marginTop: Spacing.md,
+  },
+  orderCard: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: Colors.white,
     padding: Spacing.md,
@@ -378,82 +429,35 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     ...Shadows.small,
   },
-  userAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  userInitial: {
-    fontSize: FontSize.lg,
-    fontWeight: '700',
-    color: Colors.white,
-  },
-  restaurantIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.primaryLight + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listContent: {
+  orderInfo: {
     flex: 1,
-    marginLeft: Spacing.md,
   },
-  listTitle: {
+  orderNumber: {
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.text.primary,
   },
-  listSubtitle: {
+  orderCustomer: {
     fontSize: FontSize.sm,
     color: Colors.text.secondary,
     marginTop: 2,
   },
-  badge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
+  orderMeta: {
+    alignItems: 'flex-end',
   },
-  adminBadge: {
-    backgroundColor: '#6366F120',
-  },
-  customerBadge: {
-    backgroundColor: '#10B98120',
-  },
-  badgeText: {
-    fontSize: FontSize.xs,
+  orderAmount: {
+    fontSize: FontSize.md,
     fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  adminBadgeText: {
-    color: '#6366F1',
-  },
-  customerBadgeText: {
-    color: '#10B981',
+    color: Colors.primary,
   },
   statusBadge: {
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-  },
-  activeBadge: {
-    backgroundColor: '#10B98120',
-  },
-  inactiveBadge: {
-    backgroundColor: '#EF444420',
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    marginTop: 4,
   },
   statusText: {
     fontSize: FontSize.xs,
     fontWeight: '700',
-  },
-  activeText: {
-    color: '#10B981',
-  },
-  inactiveText: {
-    color: '#EF4444',
   },
 });

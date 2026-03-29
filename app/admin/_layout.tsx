@@ -78,11 +78,11 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="restaurants"
         options={{
-          title: 'Restaurants',
+          title: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="restaurant-outline" size={size} color={color} />
+            <Ionicons name="settings-outline" size={size} color={color} />
           ),
-          headerTitle: 'Manage Restaurants',
+          headerTitle: 'Restaurant Settings',
         }}
       />
       <Tabs.Screen

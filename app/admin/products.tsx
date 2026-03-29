@@ -17,11 +17,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { useAdminStore, MenuItem, Restaurant } from '@/store/adminStore';
+import { useAdminStore, MenuItem } from '@/store/adminStore';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
 
 interface MenuItemFormData {
-  restaurant_id: number;
   name: string;
   description: string;
   price: string;
@@ -39,7 +38,6 @@ interface ImageFile {
 }
 
 const INITIAL_FORM_DATA: MenuItemFormData = {
-  restaurant_id: 0,
   name: '',
   description: '',
   price: '',
@@ -54,13 +52,10 @@ export default function ProductsManagement() {
   const insets = useSafeAreaInsets();
   const {
     menuItems,
-    restaurants,
     isLoadingMenuItems,
-    isLoadingRestaurants,
     isLoading,
     error,
     fetchMenuItems,
-    fetchRestaurants,
     createMenuItem,
     updateMenuItem,
     deleteMenuItem,
@@ -72,12 +67,10 @@ export default function ProductsManagement() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [formData, setFormData] = useState<MenuItemFormData>(INITIAL_FORM_DATA);
-  const [selectedRestaurant, setSelectedRestaurant] = useState<number | null>(null);
   const [selectedImage, setSelectedImage] = useState<ImageFile | null>(null);
 
   useEffect(() => {
     fetchMenuItems();
-    fetchRestaurants();
   }, []);
 
   const handleAdd = () => {
@@ -90,7 +83,6 @@ export default function ProductsManagement() {
   const handleEdit = (item: MenuItem) => {
     setEditingItem(item);
     setFormData({
-      restaurant_id: item.restaurant_id,
       name: item.name,
       description: item.description,
       price: item.price.toString(),
@@ -166,7 +158,7 @@ export default function ProductsManagement() {
   };
 
   const handleSave = async () => {
-    if (!formData.name.trim() || !formData.restaurant_id || !formData.price || !formData.category) {
+    if (!formData.name.trim() || !formData.price || !formData.category) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
@@ -191,10 +183,6 @@ export default function ProductsManagement() {
     }
   };
 
-  const filteredItems = selectedRestaurant
-    ? menuItems.filter(item => item.restaurant_id === selectedRestaurant)
-    : menuItems;
-
   const renderProduct = ({ item }: { item: MenuItem }) => (
     <View style={styles.productCard}>
       <View style={styles.productInfo}>
@@ -205,9 +193,6 @@ export default function ProductsManagement() {
           <Text style={styles.productName}>{item.name}</Text>
           <Text style={styles.productMeta}>
             ${typeof item.price === 'number' ? item.price.toFixed(2) : parseFloat(item.price || '0').toFixed(2)} • {item.category}
-          </Text>
-          <Text style={styles.productRestaurant}>
-            {item.restaurant?.name || 'Unknown Restaurant'}
           </Text>
           <View style={styles.badges}>
             {item.popular && (
@@ -260,7 +245,7 @@ export default function ProductsManagement() {
     </View>
   );
 
-  if ((isLoadingMenuItems || isLoadingRestaurants) && menuItems.length === 0) {
+  if (isLoadingMenuItems && menuItems.length === 0) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -275,39 +260,12 @@ export default function ProductsManagement() {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Products</Text>
-          <Text style={styles.subtitle}>{filteredItems.length} products</Text>
+          <Text style={styles.subtitle}>{menuItems.length} products</Text>
         </View>
         <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
           <Ionicons name="add" size={24} color={Colors.white} />
         </TouchableOpacity>
       </View>
-
-      {/* Restaurant Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterContainer}
-      >
-        <TouchableOpacity
-          style={[styles.filterChip, selectedRestaurant === null && styles.filterChipActive]}
-          onPress={() => setSelectedRestaurant(null)}
-        >
-          <Text style={[styles.filterText, selectedRestaurant === null && styles.filterTextActive]}>
-            All
-          </Text>
-        </TouchableOpacity>
-        {restaurants.map((restaurant) => (
-          <TouchableOpacity
-            key={restaurant.id}
-            style={[styles.filterChip, selectedRestaurant === restaurant.id && styles.filterChipActive]}
-            onPress={() => setSelectedRestaurant(restaurant.id)}
-          >
-            <Text style={[styles.filterText, selectedRestaurant === restaurant.id && styles.filterTextActive]}>
-              {restaurant.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
       {error && (
         <View style={styles.errorBanner}>
@@ -320,7 +278,7 @@ export default function ProductsManagement() {
 
       {/* Products List */}
       <FlatList
-        data={filteredItems}
+        data={menuItems}
         renderItem={renderProduct}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContent}
@@ -347,29 +305,6 @@ export default function ProductsManagement() {
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
                   <Ionicons name="close" size={24} color={Colors.text.primary} />
                 </TouchableOpacity>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Restaurant *</Text>
-                <View style={styles.restaurantChips}>
-                  {restaurants.map((restaurant) => (
-                    <TouchableOpacity
-                      key={restaurant.id}
-                      style={[
-                        styles.restaurantChip,
-                        formData.restaurant_id === restaurant.id && styles.restaurantChipActive,
-                      ]}
-                      onPress={() => setFormData({ ...formData, restaurant_id: restaurant.id })}
-                    >
-                      <Text style={[
-                        styles.restaurantChipText,
-                        formData.restaurant_id === restaurant.id && styles.restaurantChipTextActive,
-                      ]}>
-                        {restaurant.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
               </View>
 
               <View style={styles.formGroup}>
@@ -552,31 +487,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...Shadows.medium,
   },
-  filterContainer: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    gap: Spacing.sm,
-  },
-  filterChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.gray[200],
-  },
-  filterChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    fontWeight: '600',
-  },
-  filterTextActive: {
-    color: Colors.white,
-  },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -627,11 +537,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.primary,
     fontWeight: '600',
-    marginTop: 2,
-  },
-  productRestaurant: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
     marginTop: 2,
   },
   badges: {
@@ -774,28 +679,6 @@ const styles = StyleSheet.create({
   removeImageText: {
     color: Colors.danger,
     fontSize: FontSize.sm,
-    fontWeight: '600',
-  },
-  restaurantChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-  },
-  restaurantChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray[100],
-  },
-  restaurantChipActive: {
-    backgroundColor: Colors.primary,
-  },
-  restaurantChipText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-  },
-  restaurantChipTextActive: {
-    color: Colors.white,
     fontWeight: '600',
   },
   switchRow: {
