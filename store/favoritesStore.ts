@@ -4,18 +4,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const FAVORITES_STORAGE_KEY = '@foodify_favorites';
 
 interface FavoriteItem {
-  type: 'restaurant' | 'dish';
+  type: 'menuItem';
   id: string;
-  restaurantId?: string; // For dishes - which restaurant they belong to
 }
 
 interface FavoritesState {
   favorites: FavoriteItem[];
   isLoaded: boolean;
   toggleFavorite: (item: FavoriteItem) => void;
-  isFavorite: (type: 'restaurant' | 'dish', id: string) => boolean;
-  getFavoriteRestaurantIds: () => string[];
-  getFavoriteDishIds: () => string[];
+  isFavorite: (type: 'menuItem', id: string) => boolean;
+  getFavoriteIds: () => string[];
   loadFromStorage: () => Promise<void>;
 }
 
@@ -42,20 +40,12 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
     saveFavoritesToStorage(newFavorites);
   },
 
-  isFavorite: (type: 'restaurant' | 'dish', id: string) => {
+  isFavorite: (type: 'menuItem', id: string) => {
     return get().favorites.some((f) => f.type === type && f.id === id);
   },
 
-  getFavoriteRestaurantIds: () => {
-    return get()
-      .favorites.filter((f) => f.type === 'restaurant')
-      .map((f) => f.id);
-  },
-
-  getFavoriteDishIds: () => {
-    return get()
-      .favorites.filter((f) => f.type === 'dish')
-      .map((f) => f.id);
+  getFavoriteIds: () => {
+    return get().favorites.map((f) => f.id);
   },
 
   loadFromStorage: async () => {

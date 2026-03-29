@@ -17,8 +17,9 @@ import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadows } from '@/constants/theme';
-import { useDataStore, Category, Restaurant } from '@/store/dataStore';
+import { useDataStore, Category, MenuItem } from '@/store/dataStore';
 import { useFavoritesStore } from '@/store/favoritesStore';
+import { useCartStore } from '@/store/cartStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -32,36 +33,35 @@ export default function SearchScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [localResults, setLocalResults] = useState<Restaurant[]>([]);
 
   // Real data from API
   const {
     categories,
-    restaurants,
+    menuItems,
     searchResults,
-    isLoadingRestaurants,
+    isLoadingMenuItems,
     isLoadingSearch,
     fetchCategories,
-    fetchRestaurants,
+    fetchMenuItems,
     search,
   } = useDataStore();
 
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
+  const addItem = useCartStore((s) => s.addItem);
 
   // Fetch data on mount
   useEffect(() => {
     fetchCategories();
-    fetchRestaurants();
+    fetchMenuItems();
   }, []);
 
-  // Handle category param from navigation (e.g., from Home screen)
+  // Handle category param from navigation
   useEffect(() => {
     if (params.category) {
       setSelectedCategory(params.category);
       setSearchQuery('');
-      // Filter restaurants by category
-      fetchRestaurants({ category: params.category });
+      fetchMenuItems({ category: params.category });
     }
   }, [params.category]);
 
@@ -75,7 +75,7 @@ export default function SearchScreen() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Auto-focus the search input on mount (only if no category pre-selected)
+  // Auto-focus the search input on mount
   useEffect(() => {
     if (!params.category) {
       const timer = setTimeout(() => {
@@ -87,16 +87,16 @@ export default function SearchScreen() {
 
   const displayResults = useMemo(() => {
     if (searchQuery.trim() && searchResults) {
-      return searchResults.restaurants;
+      return searchResults.menu_items;
     }
     if (selectedCategory) {
-      return restaurants;
+      return menuItems;
     }
     return [];
-  }, [searchQuery, selectedCategory, searchResults, restaurants]);
+  }, [searchQuery, selectedCategory, searchResults, menuItems]);
 
   const isShowingResults = searchQuery.trim().length > 0 || selectedCategory !== null;
-  const isLoading = isLoadingRestaurants || isLoadingSearch;
+  const isLoading = isLoadingMenuItems || isLoadingSearch;
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
@@ -106,41 +106,58 @@ export default function SearchScreen() {
   const handleClearAll = useCallback(() => {
     setSearchQuery('');
     setSelectedCategory(null);
+    fetchMenuItems();
     inputRef.current?.focus();
-  }, []);
+  }, [fetchMenuItems]);
 
   const handleCategoryChipPress = useCallback((categoryName: string) => {
     setSelectedCategory((prev) => {
       const newCategory = prev === categoryName ? null : categoryName;
       if (newCategory) {
-        fetchRestaurants({ category: newCategory });
+        fetchMenuItems({ category: newCategory });
+      } else {
+        fetchMenuItems();
       }
       return newCategory;
     });
     setSearchQuery('');
-  }, [fetchRestaurants]);
+  }, [fetchMenuItems]);
 
   const handlePopularCategoryPress = useCallback((categoryName: string) => {
     setSelectedCategory(categoryName);
     setSearchQuery('');
-    fetchRestaurants({ category: categoryName });
+    fetchMenuItems({ category: categoryName });
     Keyboard.dismiss();
-  }, [fetchRestaurants]);
+  }, [fetchMenuItems]);
 
-  const handleRestaurantPress = useCallback(
-    (restaurantId: string | number) => {
+  const handleItemPress = useCallback(
+    (itemId: string | number) => {
       Keyboard.dismiss();
-      router.push(`/restaurant/${restaurantId}` as Href);
+      router.push(`/menu-item/${itemId}` as Href);
     },
     [router],
   );
 
   const handleFavoriteToggle = useCallback(
-    (restaurantId: string | number) => {
+    (itemId: string | number) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      toggleFavorite({ type: 'restaurant', id: restaurantId.toString() });
+      toggleFavorite({ type: 'menuItem', id: itemId.toString() });
     },
     [toggleFavorite],
+  );
+
+  const handleAddToCart = useCallback(
+    (item: MenuItem) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      addItem({
+        menuItem: item,
+        quantity: 1,
+        selectedSize: item.sizes && item.sizes.length > 0 
+          ? item.sizes[0] 
+          : { name: 'Regular', price: item.price },
+      });
+    },
+    [addItem],
   );
 
   const renderCategoryChip = useCallback(
@@ -155,7 +172,11 @@ export default function SearchScreen() {
           onPress={() => handleCategoryChipPress(item.name)}
           activeOpacity={0.7}
         >
-          <Text style={styles.categoryChipEmoji}>{item.icon || '🍽️'}</Text>
+          {item.image ? (
+            <Image source={{ uri: item.image }} style={styles.categoryChipImage} />
+          ) : (
+            <Text style={styles.categoryChipEmoji}>{item.icon || '🍽️'}</Text>
+          )}
           <Text
             style={[
               styles.categoryChipText,
@@ -170,19 +191,19 @@ export default function SearchScreen() {
     [selectedCategory, handleCategoryChipPress],
   );
 
-  const renderRestaurantCard = useCallback(
-    ({ item }: { item: Restaurant }) => {
-      const favorited = isFavorite('restaurant', item.id.toString());
+  const renderMenuItem = useCallback(
+    ({ item }: { item: MenuItem }) => {
+      const favorited = isFavorite('menuItem', item.id.toString());
       return (
         <TouchableOpacity
-          style={styles.resultCard}
-          onPress={() => handleRestaurantPress(item.id)}
+          style={styles.itemCard}
+          onPress={() => handleItemPress(item.id)}
           activeOpacity={0.9}
         >
-          <View style={styles.resultImageContainer}>
+          <View style={styles.itemImageContainer}>
             <Image
-              source={{ uri: item.image || 'https://via.placeholder.com/600x400' }}
-              style={styles.resultImage}
+              source={{ uri: item.image || 'https://via.placeholder.com/400x300' }}
+              style={styles.itemImage}
               resizeMode="cover"
             />
             <TouchableOpacity
@@ -196,235 +217,172 @@ export default function SearchScreen() {
                 color={favorited ? Colors.primary : Colors.white}
               />
             </TouchableOpacity>
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryBadgeText}>{item.category}</Text>
+            </View>
           </View>
-          <View style={styles.resultInfo}>
-            <View style={styles.resultHeader}>
-              <Text style={styles.resultName} numberOfLines={1}>
-                {item.name}
+          <View style={styles.itemInfo}>
+            <Text style={styles.itemName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.itemDescription} numberOfLines={2}>
+              {item.description}
+            </Text>
+            <View style={styles.itemFooter}>
+              <Text style={styles.itemPrice}>
+                ${Number(item.price).toFixed(2)}
               </Text>
-              <View style={styles.ratingContainer}>
-                <Ionicons name="star" size={14} color={Colors.star} />
-                <Text style={styles.ratingText}>{item.rating}</Text>
-              </View>
-            </View>
-            <View style={styles.cuisineTags}>
-              {item.cuisine?.slice(0, 3).map((cuisine, index) => (
-                <View key={index} style={styles.cuisineTag}>
-                  <Text style={styles.cuisineTagText}>{cuisine}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={styles.resultMeta}>
-              <View style={styles.metaItem}>
-                <Ionicons
-                  name="time-outline"
-                  size={14}
-                  color={Colors.text.secondary}
-                />
-                <Text style={styles.metaText}>{item.delivery_time}</Text>
-              </View>
-              <View style={styles.metaDot} />
-              <View style={styles.metaItem}>
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={Colors.text.secondary}
-                />
-                <Text style={styles.metaText}>{item.distance || 'Nearby'}</Text>
-              </View>
-              <View style={styles.metaDot} />
-              <Text style={styles.deliveryFee}>
-                {item.delivery_fee === 0
-                  ? 'Free delivery'
-                  : `$${Number(item.delivery_fee).toFixed(2)} delivery`}
-              </Text>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => handleAddToCart(item)}
+              >
+                <Ionicons name="add" size={20} color={Colors.white} />
+              </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       );
     },
-    [isFavorite, handleRestaurantPress, handleFavoriteToggle],
-  );
-
-  const categoryKeyExtractor = useCallback(
-    (item: Category) => `chip-${item.id}`,
-    [],
-  );
-  const resultKeyExtractor = useCallback(
-    (item: Restaurant) => `result-${item.id}`,
-    [],
+    [isFavorite, handleFavoriteToggle, handleAddToCart, handleItemPress],
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Ionicons
-        name="search-outline"
-        size={64}
-        color={Colors.gray[300]}
-      />
-      <Text style={styles.emptyTitle}>No restaurants found</Text>
-      <Text style={styles.emptySubtitle}>
-        Try searching with a different term or browse categories
+      <Ionicons name="search-outline" size={64} color={Colors.gray[300]} />
+      <Text style={styles.emptyTitle}>No results found</Text>
+      <Text style={styles.emptyText}>
+        Try adjusting your search or filters
       </Text>
-      {(searchQuery.trim().length > 0 || selectedCategory) && (
-        <TouchableOpacity
-          style={styles.clearFilterButton}
-          onPress={handleClearAll}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.clearFilterText}>Clear filters</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.clearButton} onPress={handleClearAll}>
+        <Text style={styles.clearButtonText}>Clear All</Text>
+      </TouchableOpacity>
     </View>
   );
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header with Search Bar */}
+      {/* Header with Search */}
       <View style={styles.header}>
-        <View style={styles.searchContainer}>
-          <Ionicons
-            name="search"
-            size={20}
-            color={Colors.text.light}
-            style={styles.searchIcon}
-          />
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color={Colors.text.light} />
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
-            placeholder="Search restaurants, dishes..."
-            placeholderTextColor={Colors.text.light}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            placeholder="Search food & dishes..."
+            placeholderTextColor={Colors.text.light}
             returnKeyType="search"
-            autoCapitalize="none"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity
-              onPress={handleClearSearch}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons
-                name="close-circle"
-                size={20}
-                color={Colors.text.light}
-              />
+            <TouchableOpacity onPress={handleClearSearch}>
+              <Ionicons name="close-circle" size={20} color={Colors.text.light} />
             </TouchableOpacity>
           )}
         </View>
+        {(searchQuery.length > 0 || selectedCategory) && (
+          <TouchableOpacity style={styles.clearAllButton} onPress={handleClearAll}>
+            <Text style={styles.clearAllText}>Clear</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Category Chips */}
-      {!isShowingResults && (
-        <View style={styles.categoriesSection}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-          <FlatList
-            data={categories}
-            renderItem={renderCategoryChip}
-            keyExtractor={categoryKeyExtractor}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesList}
-          />
-        </View>
-      )}
+      {/* Categories Scroll */}
+      <View style={styles.categoriesSection}>
+        <FlatList
+          data={categories}
+          renderItem={renderCategoryChip}
+          keyExtractor={(item) => `cat-${item.id}`}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryList}
+        />
+      </View>
 
-      {/* Search Results or Browse Section */}
+      {/* Results or Default Content */}
       {isShowingResults ? (
-        <>
-          {/* Results Header */}
-          <View style={styles.resultsHeader}>
-            <Text style={styles.resultsTitle}>
-              {searchQuery.trim()
-                ? `Results for "${searchQuery}"`
-                : selectedCategory
-                ? `${selectedCategory} Restaurants`
-                : 'All Restaurants'}
-            </Text>
-            <Text style={styles.resultsCount}>
-              {displayResults.length} found
-            </Text>
+        isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.primary} />
           </View>
-
-          {/* Results List */}
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-            </View>
-          ) : (
-            <FlatList
-              data={displayResults}
-              renderItem={renderRestaurantCard}
-              keyExtractor={resultKeyExtractor}
-              contentContainerStyle={styles.resultsList}
-              showsVerticalScrollIndicator={false}
-              ListEmptyComponent={renderEmptyState}
-            />
-          )}
-        </>
+        ) : displayResults.length === 0 ? (
+          renderEmptyState()
+        ) : (
+          <FlatList
+            data={displayResults}
+            renderItem={renderMenuItem}
+            keyExtractor={(item) => `result-${item.id}`}
+            contentContainerStyle={styles.resultsList}
+            showsVerticalScrollIndicator={false}
+            ListHeaderComponent={() => (
+              <View style={styles.resultsHeader}>
+                <Text style={styles.resultsTitle}>
+                  {searchQuery.trim()
+                    ? `Search Results (${displayResults.length})`
+                    : `${selectedCategory} Items (${displayResults.length})`}
+                </Text>
+              </View>
+            )}
+          />
+        )
       ) : (
         <ScrollView
-          style={styles.browseContainer}
-          contentContainerStyle={styles.browseContent}
+          style={styles.defaultContent}
+          contentContainerStyle={styles.defaultContentInner}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {/* Popular Categories */}
-          <View style={styles.popularSection}>
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Popular Categories</Text>
-            <View style={styles.popularGrid}>
-              {POPULAR_CATEGORIES.map((category) => (
+            <View style={styles.popularCategoriesGrid}>
+              {POPULAR_CATEGORIES.map((categoryName) => (
                 <TouchableOpacity
-                  key={category}
-                  style={styles.popularCard}
-                  onPress={() => handlePopularCategoryPress(category)}
+                  key={categoryName}
+                  style={styles.popularCategoryCard}
+                  onPress={() => handlePopularCategoryPress(categoryName)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.popularCardText}>{category}</Text>
-                  <Ionicons
-                    name="arrow-forward"
-                    size={16}
-                    color={Colors.primary}
-                  />
+                  <Text style={styles.popularCategoryText}>{categoryName}</Text>
+                  <Ionicons name="arrow-forward" size={16} color={Colors.primary} />
                 </TouchableOpacity>
               ))}
             </View>
           </View>
 
-          {/* All Restaurants */}
-          <View style={styles.allRestaurantsSection}>
-            <Text style={styles.sectionTitle}>All Restaurants</Text>
-            {isLoadingRestaurants ? (
-              <ActivityIndicator size="large" color={Colors.primary} />
-            ) : (
-              restaurants.slice(0, 10).map((restaurant) => (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={styles.allRestaurantCard}
-                  onPress={() => handleRestaurantPress(restaurant.id)}
-                  activeOpacity={0.9}
-                >
-                  <Image
-                    source={{ uri: restaurant.image || 'https://via.placeholder.com/400x300' }}
-                    style={styles.allRestaurantImage}
-                    resizeMode="cover"
-                  />
-                  <View style={styles.allRestaurantInfo}>
-                    <Text style={styles.allRestaurantName} numberOfLines={1}>
-                      {restaurant.name}
-                    </Text>
-                    <Text style={styles.allRestaurantCuisine} numberOfLines={1}>
-                      {restaurant.cuisine?.join(', ')}
-                    </Text>
-                    <View style={styles.allRestaurantMeta}>
-                      <Ionicons name="star" size={12} color={Colors.star} />
-                      <Text style={styles.allRestaurantRating}>{restaurant.rating}</Text>
-                      <Text style={styles.allRestaurantTime}>• {restaurant.delivery_time}</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
+          {/* Recent Search Suggestions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Quick Search</Text>
+            <View style={styles.suggestionChips}>
+              {['Pizza', 'Burger', 'Pasta', 'Salad', 'Dessert', 'Drinks'].map(
+                (suggestion) => (
+                  <TouchableOpacity
+                    key={suggestion}
+                    style={styles.suggestionChip}
+                    onPress={() => {
+                      setSearchQuery(suggestion);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="search" size={14} color={Colors.text.secondary} />
+                    <Text style={styles.suggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                )
+              )}
+            </View>
           </View>
+
+          {/* Browse All */}
+          <TouchableOpacity
+            style={styles.browseAllButton}
+            onPress={() => {
+              fetchMenuItems();
+              setSelectedCategory('All');
+            }}
+          >
+            <Text style={styles.browseAllText}>Browse All Menu Items</Text>
+            <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+          </TouchableOpacity>
         </ScrollView>
       )}
     </View>
@@ -437,20 +395,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
+    gap: Spacing.md,
   },
-  searchContainer: {
+  searchInputContainer: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.xl,
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    ...Shadows.medium,
-  },
-  searchIcon: {
-    marginRight: Spacing.sm,
+    borderRadius: BorderRadius.xl,
+    gap: Spacing.sm,
+    ...Shadows.small,
   },
   searchInput: {
     flex: 1,
@@ -458,61 +418,49 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     paddingVertical: Spacing.sm,
   },
+  clearAllButton: {
+    paddingHorizontal: Spacing.md,
+  },
+  clearAllText: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
   categoriesSection: {
-    marginTop: Spacing.md,
+    paddingBottom: Spacing.md,
   },
-  sectionTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  categoriesList: {
+  categoryList: {
     paddingHorizontal: Spacing.lg,
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
     gap: Spacing.xs,
     ...Shadows.small,
   },
   categoryChipSelected: {
     backgroundColor: Colors.primary,
   },
+  categoryChipImage: {
+    width: 20,
+    height: 20,
+    borderRadius: BorderRadius.sm,
+  },
   categoryChipEmoji: {
-    fontSize: 20,
+    fontSize: 16,
   },
   categoryChipText: {
-    fontSize: FontSize.md,
+    fontSize: FontSize.sm,
     fontWeight: '600',
     color: Colors.text.primary,
   },
   categoryChipTextSelected: {
     color: Colors.white,
-  },
-  resultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  resultsTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-  resultsCount: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
   },
   loadingContainer: {
     flex: 1,
@@ -522,18 +470,27 @@ const styles = StyleSheet.create({
   resultsList: {
     padding: Spacing.lg,
   },
-  resultCard: {
+  resultsHeader: {
+    marginBottom: Spacing.md,
+  },
+  resultsTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  itemCard: {
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.xl,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
     overflow: 'hidden',
     ...Shadows.medium,
   },
-  resultImageContainer: {
+  itemImageContainer: {
+    width: '100%',
+    height: 180,
     position: 'relative',
-    height: 160,
   },
-  resultImage: {
+  itemImage: {
     width: '100%',
     height: '100%',
   },
@@ -544,182 +501,155 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: BorderRadius.full,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  resultInfo: {
-    padding: Spacing.md,
-  },
-  resultHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.xs,
-  },
-  resultName: {
-    flex: 1,
-    fontSize: FontSize.lg,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginRight: Spacing.sm,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingText: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-  cuisineTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-    marginBottom: Spacing.sm,
-  },
-  cuisineTag: {
-    backgroundColor: Colors.primaryLight + '15',
+  categoryBadge: {
+    position: 'absolute',
+    bottom: Spacing.md,
+    left: Spacing.md,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 4,
     borderRadius: BorderRadius.sm,
   },
-  cuisineTagText: {
+  categoryBadgeText: {
+    color: Colors.white,
     fontSize: FontSize.xs,
-    color: Colors.primary,
-    fontWeight: '500',
-  },
-  resultMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-  },
-  metaDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.text.light,
-    marginHorizontal: Spacing.sm,
-  },
-  deliveryFee: {
-    fontSize: FontSize.sm,
     fontWeight: '600',
-    color: Colors.primary,
   },
-  emptyState: {
-    padding: Spacing.xxl,
-    alignItems: 'center',
+  itemInfo: {
+    padding: Spacing.lg,
   },
-  emptyTitle: {
+  itemName: {
     fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.text.primary,
-    marginTop: Spacing.md,
     marginBottom: Spacing.xs,
   },
-  emptySubtitle: {
+  itemDescription: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.md,
+    lineHeight: 20,
+  },
+  itemFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  itemPrice: {
+    fontSize: FontSize.xl,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xxl,
+  },
+  emptyTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginTop: Spacing.lg,
+  },
+  emptyText: {
     fontSize: FontSize.md,
     color: Colors.text.secondary,
+    marginTop: Spacing.sm,
     textAlign: 'center',
-    marginBottom: Spacing.lg,
   },
-  clearFilterButton: {
-    backgroundColor: Colors.primary,
+  clearButton: {
+    marginTop: Spacing.lg,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
+    backgroundColor: Colors.primary,
     borderRadius: BorderRadius.lg,
   },
-  clearFilterText: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
+  clearButtonText: {
     color: Colors.white,
+    fontSize: FontSize.md,
+    fontWeight: '600',
   },
-  browseContainer: {
+  defaultContent: {
     flex: 1,
   },
-  browseContent: {
-    paddingBottom: Spacing.xxxl,
+  defaultContentInner: {
+    padding: Spacing.lg,
   },
-  popularSection: {
-    marginTop: Spacing.md,
+  section: {
+    marginBottom: Spacing.xl,
   },
-  popularGrid: {
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginBottom: Spacing.md,
+  },
+  popularCategoriesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
-  popularCard: {
-    width: (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.md) / 2,
+  popularCategoryCard: {
+    flex: 1,
+    minWidth: '45%',
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     backgroundColor: Colors.white,
+    padding: Spacing.lg,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
     ...Shadows.small,
   },
-  popularCardText: {
+  popularCategoryText: {
     fontSize: FontSize.md,
     fontWeight: '600',
     color: Colors.text.primary,
   },
-  allRestaurantsSection: {
-    marginTop: Spacing.xxl,
+  suggestionChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
   },
-  allRestaurantCard: {
+  suggestionChip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-    padding: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    gap: Spacing.xs,
     ...Shadows.small,
   },
-  allRestaurantImage: {
-    width: 70,
-    height: 70,
-    borderRadius: BorderRadius.md,
+  suggestionText: {
+    fontSize: FontSize.sm,
+    color: Colors.text.secondary,
   },
-  allRestaurantInfo: {
-    flex: 1,
-    marginLeft: Spacing.md,
+  browseAllButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.xl,
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
   },
-  allRestaurantName: {
+  browseAllText: {
+    color: Colors.white,
     fontSize: FontSize.md,
     fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: 2,
-  },
-  allRestaurantCuisine: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
-    marginBottom: 4,
-  },
-  allRestaurantMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  allRestaurantRating: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text.primary,
-    marginLeft: 2,
-  },
-  allRestaurantTime: {
-    fontSize: FontSize.sm,
-    color: Colors.text.secondary,
   },
 });

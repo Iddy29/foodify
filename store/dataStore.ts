@@ -26,12 +26,11 @@ export interface Restaurant {
   address: string;
   description: string;
   featured: boolean;
-  menu_items_count?: number;
+  menu_categories: string[] | null;
 }
 
 export interface MenuItem {
   id: number;
-  restaurant_id: number;
   name: string;
   description: string;
   price: number;
@@ -40,39 +39,32 @@ export interface MenuItem {
   ingredients: string[] | null;
   sizes: { name: string; price: number }[] | null;
   popular: boolean;
-}
-
-export interface RestaurantWithMenu extends Restaurant {
-  menu_categories: string[] | null;
-  menu_items: MenuItem[];
+  is_active: boolean;
 }
 
 interface DataState {
   // Data
   categories: Category[];
-  restaurants: Restaurant[];
-  featuredRestaurants: Restaurant[];
-  popularRestaurants: Restaurant[];
-  currentRestaurant: RestaurantWithMenu | null;
+  restaurant: Restaurant | null;
+  menuItems: MenuItem[];
+  popularItems: MenuItem[];
   searchResults: {
-    restaurants: Restaurant[];
     menu_items: MenuItem[];
     query: string;
   } | null;
 
   // Loading states
   isLoadingCategories: boolean;
-  isLoadingRestaurants: boolean;
   isLoadingRestaurant: boolean;
+  isLoadingMenuItems: boolean;
   isLoadingSearch: boolean;
   error: string | null;
 
   // Actions
   fetchCategories: () => Promise<void>;
-  fetchRestaurants: (filters?: { featured?: boolean; category?: string; search?: string }) => Promise<void>;
-  fetchFeaturedRestaurants: () => Promise<void>;
-  fetchPopularRestaurants: () => Promise<void>;
-  fetchRestaurant: (id: number | string) => Promise<void>;
+  fetchRestaurant: () => Promise<void>;
+  fetchMenuItems: (filters?: { category?: string; popular?: boolean; search?: string }) => Promise<void>;
+  fetchPopularItems: () => Promise<void>;
   search: (query: string) => Promise<void>;
   clearError: () => void;
 }
@@ -105,14 +97,13 @@ async function apiGet<T>(path: string): Promise<T> {
 export const useDataStore = create<DataState>((set) => ({
   // Initial state
   categories: [],
-  restaurants: [],
-  featuredRestaurants: [],
-  popularRestaurants: [],
-  currentRestaurant: null,
+  restaurant: null,
+  menuItems: [],
+  popularItems: [],
   searchResults: null,
   isLoadingCategories: false,
-  isLoadingRestaurants: false,
   isLoadingRestaurant: false,
+  isLoadingMenuItems: false,
   isLoadingSearch: false,
   error: null,
 
@@ -131,53 +122,44 @@ export const useDataStore = create<DataState>((set) => ({
     }
   },
 
-  fetchRestaurants: async (filters = {}) => {
-    set({ isLoadingRestaurants: true, error: null });
+  fetchRestaurant: async () => {
+    set({ isLoadingRestaurant: true, error: null });
+    try {
+      const restaurant = await apiGet<Restaurant>('/api/restaurant');
+      set({ restaurant, isLoadingRestaurant: false });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to fetch restaurant.',
+        isLoadingRestaurant: false,
+      });
+    }
+  },
+
+  fetchMenuItems: async (filters = {}) => {
+    set({ isLoadingMenuItems: true, error: null });
     try {
       const params = new URLSearchParams();
-      if (filters.featured) params.append('featured', '1');
       if (filters.category) params.append('category', filters.category);
+      if (filters.popular) params.append('popular', '1');
       if (filters.search) params.append('search', filters.search);
 
       const query = params.toString() ? `?${params.toString()}` : '';
-      const restaurants = await apiGet<Restaurant[]>(`/api/restaurants${query}`);
-      set({ restaurants, isLoadingRestaurants: false });
+      const menuItems = await apiGet<MenuItem[]>(`/api/menu-items${query}`);
+      set({ menuItems, isLoadingMenuItems: false });
     } catch (err) {
       set({
-        error: err instanceof Error ? err.message : 'Failed to fetch restaurants.',
-        isLoadingRestaurants: false,
+        error: err instanceof Error ? err.message : 'Failed to fetch menu items.',
+        isLoadingMenuItems: false,
       });
     }
   },
 
-  fetchFeaturedRestaurants: async () => {
+  fetchPopularItems: async () => {
     try {
-      const featuredRestaurants = await apiGet<Restaurant[]>('/api/featured-restaurants');
-      set({ featuredRestaurants });
+      const popularItems = await apiGet<MenuItem[]>('/api/popular-items');
+      set({ popularItems });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to fetch featured restaurants.' });
-    }
-  },
-
-  fetchPopularRestaurants: async () => {
-    try {
-      const popularRestaurants = await apiGet<Restaurant[]>('/api/popular-restaurants');
-      set({ popularRestaurants });
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to fetch popular restaurants.' });
-    }
-  },
-
-  fetchRestaurant: async (id) => {
-    set({ isLoadingRestaurant: true, error: null, currentRestaurant: null });
-    try {
-      const restaurant = await apiGet<RestaurantWithMenu>(`/api/restaurants/${id}`);
-      set({ currentRestaurant: restaurant, isLoadingRestaurant: false });
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Failed to fetch restaurant details.',
-        isLoadingRestaurant: false,
-      });
+      set({ error: err instanceof Error ? err.message : 'Failed to fetch popular items.' });
     }
   },
 
@@ -190,8 +172,7 @@ export const useDataStore = create<DataState>((set) => ({
     set({ isLoadingSearch: true, error: null });
     try {
       const results = await apiGet<{
-        restaurants: Restaurant[];
-        menu_items: (MenuItem & { restaurant?: { id: number; name: string } })[];
+        menu_items: MenuItem[];
         query: string;
       }>(`/api/search?q=${encodeURIComponent(query)}`);
       set({ searchResults: results, isLoadingSearch: false });
